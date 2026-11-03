@@ -16,7 +16,7 @@ It sits on top of everything but never blocks your clicks, so you can keep worki
   - A shooting star → *"Your wish will come true!"* ✨
   - A falling treat → it pops into pixel confetti
 - Works across **multiple monitors** — Santa flies from one screen to the next
-- Light on resources: about 4–5% of one CPU core and about 20 MB of memory on an Apple Silicon Mac
+- Light on resources: about 0.5% of total CPU on an M1 Mac (4–5% of one core) and about 20 MB of memory
 
 ## Menu
 
