@@ -321,15 +321,15 @@ let santaSprite: CGImage = spriteImage((0..<sleigh.count).map { sleigh[$0] + rei
 
 extension SnowWindow {
     // 별똥별: 위쪽에서 대각선으로 2.2초 만에 휙. 반짝이 꼬리를 남긴다
-    func shootStar() {
+    func shootStar(fromX: CGFloat? = nil, rightward: Bool? = nil) {
         guard let root = contentView?.layer else { return }
         let w = root.bounds.width, h = root.bounds.height
         let px: CGFloat = 3
         let size = CGSize(width: CGFloat(shootingStarSprite.width) * px, height: CGFloat(shootingStarSprite.height) * px)
-        let toRight = Bool.random()
+        let toRight = rightward ?? Bool.random()
         let dx = min(w * 0.45, 700) * (toRight ? 1 : -1)
         let dy = min(h * 0.6, abs(dx) * 0.45)
-        let start = CGPoint(x: toRight ? CGFloat.random(in: 0.05...0.5) * w : CGFloat.random(in: 0.5...0.95) * w,
+        let start = CGPoint(x: fromX ?? (toRight ? CGFloat.random(in: 0.05...0.5) * w : CGFloat.random(in: 0.5...0.95) * w),
                             y: h - CGFloat.random(in: 10...max(11, h * 0.25)))
         let end = CGPoint(x: start.x + dx, y: start.y - dy)
         let duration = 2.2
@@ -767,9 +767,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.treatDebt = 4
         at(1.0) { w.flySanta() }
         at(3.2) { w.actors.filter { $0.name == "santa" }.forEach { w.showBubble(on: $0); w.dropGifts(from: $0) } }
+        at(0.3) { w.walk("snowman") }
         at(4.0) { w.walk("penguin") }
-        at(4.5) { w.walk("snowman") }
-        at(6.0) { w.shootStar() }
+        at(6.0) { w.shootStar(fromX: 120, rightward: true) }
         at(7.0) { w.actors.filter { $0.name == "shootingStar" }.forEach { w.catchStar($0) } }
         at(7.6) { w.actors.filter { $0.name == "penguin" }.forEach { w.showBubble(on: $0) } }
         for (i, t) in [5.0, 8.4, 9.3].enumerated() {
