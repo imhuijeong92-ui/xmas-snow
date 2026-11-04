@@ -670,7 +670,6 @@ extension SnowWindow {
 
 // ── 화면 맨 아래(독 뒤)에 눈꽃이 하나씩 쌓이고, 클릭하면 산타 제설차가 지나가며 치운다 ──────────────
 let pilePx: CGFloat = 2        // 쌓인 눈 그림 한 칸 = 2pt (내리는 눈꽃과 같은 크기)
-let pileTopBand = 8            // 맨 윗켜 두께(칸). 여기는 눈꽃을 띄엄띄엄만 얹는다
 let pileCapPx = 22             // 다 찬 높이 평균(44pt). 실제 한도는 자리마다 물결처럼 오르내린다(capMap)
 var pileOn = UserDefaults.standard.object(forKey: "pile") as? Bool ?? true
 // 산타가 탄 빨간 제설차 (오른쪽을 보고 왼→오로 간다). 지붕 꼬마전구가 깜빡이고 앞날은 캔디케인 줄무늬
@@ -717,8 +716,8 @@ let peekDeer = spriteImage([
 ], outline: false)
 
 final class PileWindow: NSPanel {
-    let pile = CALayer()
-    var canvas: CGContext!
+    let pile = CAGradientLayer()   // 위는 흰색 → 아래로 옅은 하늘색 (픽셀 눈 더미 그림들의 흰색+하늘색 그늘 방식)
+    let pileShape = CAShapeLayer() // 눈 더미 윤곽 = 쌓인 높이를 부드럽게 이은 곡선 (테두리 없음)
     var heights: [Int] = []        // 칸마다 쌓인 눈 꼭대기 (그림 칸 단위)
     var capMap: [Int] = []         // 칸마다 더 쌓이지 않는 한도 — 다 차도 윗면이 일자가 아니라 둔덕지게
     var carry: CGFloat = 0
@@ -732,7 +731,7 @@ final class PileWindow: NSPanel {
     var frontRoot: CALayer { front.contentView!.layer! }
     // 다 차는 데 걸리는 시간 = 6분 ÷ (눈 양 × 눈 높이 비율) → 눈이 적게 내리면 그만큼 천천히 쌓인다
     var fillSeconds: CGFloat { 360 / (amountFactor * bandRatio) }
-    var isFull: Bool { heights.indices.filter { heights[$0] >= capMap[$0] - pileTopBand - 2 }.count >= heights.count * 85 / 100 }
+    var isFull: Bool { heights.indices.filter { heights[$0] >= capMap[$0] - 3 }.count >= heights.count * 85 / 100 }
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -773,19 +772,25 @@ final class PileWindow: NSPanel {
         front.contentView = fv
         front.setFrame(rect, display: false)
 
-        let cols = Int(ceil(rect.width / pilePx)), rows = pileCapPx + 20
+        let cols = Int(ceil(rect.width / pilePx))
         heights = Array(repeating: 0, count: cols)
-        // 큰 둔덕 + 작은 굴곡을 겹친 물결 (모니터마다 모양이 다르다)
-        let ph = (0..<3).map { _ in CGFloat.random(in: 0..<(2 * .pi)) }
+        // 큰 둔덕 + 작은 굴곡 + 동글한 혹을 겹친 물결 (모니터마다 모양이 다르다)
+        let ph = (0..<4).map { _ in CGFloat.random(in: 0..<(2 * .pi)) }
         capMap = (0..<cols).map { i in
             let x = CGFloat(i)
-            return pileCapPx + Int((6 * sin(x * 0.016 + ph[0]) + 3 * sin(x * 0.047 + ph[1]) + 1.5 * sin(x * 0.12 + ph[2])).rounded())
+            let wave: CGFloat = 6 * sin(x * 0.016 + ph[0]) + 3 * sin(x * 0.047 + ph[1]) + 1.5 * sin(x * 0.12 + ph[2])
+            let lump: CGFloat = 3.5 * abs(sin(x * 0.1 + ph[3]))  // 동글동글한 혹
+            return pileCapPx + Int((wave + lump).rounded())
         }
-        canvas = CGContext(data: nil, width: cols, height: rows, bitsPerComponent: 8, bytesPerRow: 0,
-                           space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         pile.anchorPoint = .zero
-        pile.magnificationFilter = .nearest
-        pile.frame = CGRect(x: 0, y: 0, width: CGFloat(cols) * pilePx, height: CGFloat(rows) * pilePx)
+        pile.frame = CGRect(x: 0, y: 0, width: CGFloat(cols) * pilePx, height: CGFloat(pileCapPx + 14) * pilePx)
+        pile.colors = [CGColor(red: 0.80, green: 0.87, blue: 0.95, alpha: 1), CGColor(red: 0.93, green: 0.96, blue: 1, alpha: 1),
+                       CGColor(red: 1, green: 1, blue: 1, alpha: 1)]
+        pile.locations = [0, 0.35, 0.7]
+        pile.startPoint = CGPoint(x: 0.5, y: 0)
+        pile.endPoint = CGPoint(x: 0.5, y: 1)
+        pileShape.frame = pile.bounds
+        pile.mask = pileShape
         view.layer?.addSublayer(pile)
 
         growTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.grow(1) }
@@ -868,33 +873,23 @@ final class PileWindow: NSPanel {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { burst.removeFromSuperlayer() }
     }
 
-    // 눈꽃(점·중간·큰)을 하나씩 떨궈 그 자리 눈 더미 위에 살짝 파묻히게 얹는다. 정해진 높이를 넘으면 안 얹는다
+    // 둥근 눈 뭉텅이(반지름 3–8칸)를 하나씩 얹어 울퉁불퉁하게 쌓는다. 자리마다 한도(capMap)를 넘으면 안 올라간다
     func grow(_ dt: CGFloat) {
         let n = heights.count
-        carry += CGFloat(n * pileCapPx) / (fillSeconds * 18) * dt
+        carry += CGFloat(n * pileCapPx) / (fillSeconds * 30) * dt
         var changed = false
         while carry >= 1 {
             carry -= 1
-            let r = CGFloat.random(in: 0..<1)
-            let img = flakeImages[r < 0.3 ? 0 : (r < 0.75 ? 1 : 2)]
-            let s = img.width
-            for _ in 0..<12 {
-                let x = Int.random(in: -s / 2..<n - s / 2)
-                let span = max(0, x + 1)..<min(n, x + s - 1)
-                guard !span.isEmpty else { continue }
-                let cap = span.map { capMap[$0] }.min() ?? pileCapPx
-                var y = max(0, (span.map { heights[$0] }.max() ?? 0) - s / 3)
-                // 맨 윗켜(한도 아래 8칸)는 빽빽하지 않게: 파묻지 않고, 양옆 2칸까지 다른 눈꽃이 없을 때만 띄엄띄엄 얹는다
-                if y + s - 2 > cap - pileTopBand {
-                    let around = max(0, x - 1)..<min(n, x + s + 1)
-                    if around.contains(where: { heights[$0] > cap - pileTopBand }) { continue }
-                    y = span.map { heights[$0] }.max() ?? 0
+            for _ in 0..<6 {
+                let x = Int.random(in: 0..<n), r = Int.random(in: 3...8)
+                let base = heights[x] - r / 3
+                var grew = false
+                for i in max(0, x - r)...min(n - 1, x + r) {
+                    let dx = CGFloat(i - x)
+                    let v = min(capMap[i], base + Int((sqrt(CGFloat(r * r) - dx * dx) * 0.7).rounded()))
+                    if v > heights[i] { heights[i] = v; grew = true }
                 }
-                if y + s - 2 > cap { continue }
-                canvas.draw(img, in: CGRect(x: x, y: y, width: s, height: s))
-                for c in span { heights[c] = max(heights[c], y + s - 2) }
-                changed = true
-                break
+                if grew { changed = true; break }
             }
         }
         if changed { redraw() }
@@ -902,9 +897,25 @@ final class PileWindow: NSPanel {
     }
 
     func redraw() {
+        // 이웃 5칸 평균으로 계단을 펴고, 점 사이를 2차 곡선으로 이어 매끈한 윤곽을 만든다
+        let n = heights.count
+        let smooth: [CGFloat] = (0..<n).map { i in
+            let r = max(0, i - 2)...min(n - 1, i + 2)
+            return CGFloat(r.reduce(0) { $0 + heights[$1] }) / CGFloat(r.count) * pilePx
+        }
+        let path = CGMutablePath()
+        path.move(to: .zero)
+        path.addLine(to: CGPoint(x: 0, y: smooth.first ?? 0))
+        for i in 1..<n {
+            let p0 = CGPoint(x: CGFloat(i - 1) * pilePx, y: smooth[i - 1]), p1 = CGPoint(x: CGFloat(i) * pilePx, y: smooth[i])
+            path.addQuadCurve(to: CGPoint(x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2), control: p0)
+        }
+        path.addLine(to: CGPoint(x: CGFloat(n) * pilePx, y: smooth.last ?? 0))
+        path.addLine(to: CGPoint(x: CGFloat(n) * pilePx, y: 0))
+        path.closeSubpath()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        pile.contents = canvas.makeImage()
+        pileShape.path = path
         CATransaction.commit()
     }
 
@@ -957,7 +968,6 @@ final class PileWindow: NSPanel {
     }
 
     func clear() {
-        canvas.clear(CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height))
         heights = Array(repeating: 0, count: heights.count)
         redraw()
     }
@@ -1022,7 +1032,6 @@ final class PileWindow: NSPanel {
             spray.birthRate = ahead > 0 ? 1 : 0
             CATransaction.commit()
             if self.heights[0..<upTo].contains(where: { $0 > 0 }) {
-                self.canvas.clear(CGRect(x: 0, y: 0, width: upTo, height: self.canvas.height))
                 for i in 0..<upTo { self.heights[i] = 0 }
                 self.redraw()
             }

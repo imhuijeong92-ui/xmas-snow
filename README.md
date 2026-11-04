@@ -16,7 +16,7 @@ It sits on top of everything but never blocks your clicks, so you can keep worki
   - A shooting star → *"Your wish will come true!"* ✨
   - A falling treat → it pops into pixel confetti
   - The snow pile (or Rudolph) → Santa drives by in a snowplow 🚜 and clears it
-- **Snow piles up** flake by flake along the bottom of your screen — behind the Dock on macOS, just above the taskbar on Windows. Less snow or a lower snow height means it piles up more slowly. Once it reaches its full height it stays there, and Rudolph peeks in from the right edge to ask *"Time to clear the snow?"*
+- **Snow piles up** in soft, lumpy drifts along the bottom of your screen — behind the Dock on macOS, just above the taskbar on Windows. Less snow or a lower snow height means it piles up more slowly. Once it reaches its full height it stays there, and Rudolph peeks in from the right edge to ask *"Time to clear the snow?"*
 - Works across **multiple monitors** — Santa flies from one screen to the next
 - Light on resources: under 1% of total CPU on an M1 Mac (about 6–7% of one core) and about 27 MB of memory
 

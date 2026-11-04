@@ -676,11 +676,9 @@ class SnowForm : Form
 // 모니터마다 아래쪽 띠 창 하나(클릭 통과 · 최상단). 눈은 영구 비트맵에 눈송이를 찍어 쌓고, 열별 높이 지도를 따로 둔다.
 class PileForm : Form
 {
-    const int TopBand = 8;  // 윗면 8px 는 듬성듬성 한 겹만 얹는다
     const int Cap = 22;  // 최대 높이 = 캔버스 22px (2px 기준 44px)
     static readonly float[] AmountFactor = { 0.5f, 1f, 2f };
     static readonly Color PileEdge = Color.FromArgb(143, 163, 184);
-    static readonly SolidBrush KeyBrush = new SolidBrush(Art.Key);
     static readonly string[] PlowA = {
         "....W...................",
         "....RR..................",
@@ -727,7 +725,6 @@ class PileForm : Form
     readonly Bitmap pileBmp;          // 쌓인 눈 (바탕 = 투명색)
     readonly Graphics pg;
     readonly ImageAttributes keyAttr = new ImageAttributes();
-    readonly Bitmap[] pat = new Bitmap[3];  // 내려앉는 눈송이 (점·중간·큰)
     readonly Bitmap[] plowBmp = new Bitmap[2];  // 0 = 전구 줄 A, 1 = B
     readonly Bitmap rudBmp;
     readonly List<Spark> sparks = new List<Spark>();
@@ -752,9 +749,9 @@ class PileForm : Form
         h = new int[cols];
         bmpH = (Cap + 20) * u;
         cap = new int[cols];
-        double p0 = rnd.NextDouble() * 2 * Math.PI, p1 = rnd.NextDouble() * 2 * Math.PI, p2 = rnd.NextDouble() * 2 * Math.PI;
+        double p0 = rnd.NextDouble() * 2 * Math.PI, p1 = rnd.NextDouble() * 2 * Math.PI, p2 = rnd.NextDouble() * 2 * Math.PI, p3 = rnd.NextDouble() * 2 * Math.PI;
         for (int i = 0; i < cols; i++)
-            cap[i] = Cap + (int)Math.Round(6 * Math.Sin(i * 0.016 + p0) + 3 * Math.Sin(i * 0.047 + p1) + 1.5 * Math.Sin(i * 0.12 + p2));
+            cap[i] = Cap + (int)Math.Round(6 * Math.Sin(i * 0.016 + p0) + 3 * Math.Sin(i * 0.047 + p1) + 1.5 * Math.Sin(i * 0.12 + p2) + 3.5 * Math.Abs(Math.Sin(i * 0.1 + p3)));  // 마지막 항 = 동글동글한 혹
         pileBmp = new Bitmap(cols * u, bmpH);
         pg = Graphics.FromImage(pileBmp);
         pg.Clear(Art.Key);
@@ -773,9 +770,6 @@ class PileForm : Form
         TransparencyKey = Art.Key;
         DoubleBuffered = true;
 
-        pat[0] = Art.Sprite(Art.FlakeDot, u, Art.FlakeEdge);
-        pat[1] = Art.Sprite(Art.FlakeMid, u, Art.FlakeEdge);
-        pat[2] = Art.Sprite(Art.FlakeBig, u, Art.FlakeEdge);
         int pc = Math.Max(1, (int)Math.Round(3 * scale));
         string[] b = (string[])PlowA.Clone();
         b[8] = PlowRowB;
@@ -812,41 +806,54 @@ class PileForm : Form
         cleared = 0;
     }
 
-    // 눈송이 하나가 내려앉는다: 아래에서부터 쌓이도록 좌우 위치를 고르고 높이를 정해 영구 비트맵에 찍는다
+    // 둥근 눈 뭉텅이(반지름 3–8칸)를 하나씩 얹어 울퉁불퉁하게 쌓는다. 테두리 없이 흰색으로만 칠한다. 열별 상한(cap)을 넘으면 안 올라간다
     void Land()
     {
-        double r = rnd.NextDouble();
-        Bitmap bm = pat[r < 0.30 ? 0 : (r < 0.75 ? 1 : 2)];
-        int size = bm.Width / u;
-        for (int tries = 0; tries < 12; tries++)
+        for (int tries = 0; tries < 6; tries++)
         {
-            int x = rnd.Next(cols + size) - size + size / 2;  // 가장자리에 걸쳐도 된다
-            int lo = Math.Max(0, x + 1), hi = Math.Min(cols - 1, x + size - 2);  // 테두리 칸을 뺀 안쪽 열
-            if (lo > hi) continue;
-            int mx = 0, mc = int.MaxValue;
-            for (int i = lo; i <= hi; i++) { if (h[i] > mx) mx = h[i]; if (cap[i] < mc) mc = cap[i]; }
-            int y = mx - size / 3;  // 조금 파묻히게
-            int top = y + size - 2;
-            if (top > mc - TopBand)  // 윗띠에 닿는 눈송이: 둘레에 이미 윗띠까지 찬 열이 있으면 건너뛰고, 파묻지 않고 얹는다
+            int x = rnd.Next(cols), r = 3 + rnd.Next(6);
+            int bse = h[x] - r / 3;
+            int lo = Math.Max(0, x - r), hi = Math.Min(cols - 1, x + r);
+            bool grew = false;
+            for (int i = lo; i <= hi; i++)
             {
-                bool crowded = false;
-                for (int i = Math.Max(0, x - 1); i < Math.Min(cols, x + size + 1); i++)
-                    if (h[i] > mc - TopBand) { crowded = true; break; }
-                if (crowded) continue;
-                y = mx;
-                top = y + size - 2;
+                int dx = i - x;
+                int v = Math.Min(cap[i], bse + (int)Math.Round(Math.Sqrt(r * r - dx * dx) * 0.7));
+                if (v > h[i]) { h[i] = v; grew = true; }
             }
-            if (top > mc) continue;
-            pg.DrawImage(bm, new Rectangle(x * u, bmpH - (y + size) * u, bm.Width, bm.Height), 0, 0, bm.Width, bm.Height, GraphicsUnit.Pixel, keyAttr);
-            for (int i = lo; i <= hi; i++) if (h[i] < top) h[i] = top;
-            return;
+            if (grew) return;
+        }
+    }
+
+    // 눈 더미를 다시 그린다: 이웃 5칸 평균으로 계단을 펴서 매끈한 윤곽을 만들고, 위는 흰색 → 아래로 옅은 하늘색.
+    // 투명색(마젠타)과 섞여 분홍 테두리가 생기지 않게 안티앨리어싱은 끈다
+    void RenderPile()
+    {
+        pg.Clear(Art.Key);
+        Point[] pts = new Point[cols + 2];
+        for (int i = 0; i < cols; i++)
+        {
+            int a = Math.Max(0, i - 2), b = Math.Min(cols - 1, i + 2), sum = 0;
+            for (int j = a; j <= b; j++) sum += h[j];
+            pts[i] = new Point(i * u + u / 2, bmpH - (int)Math.Round((float)sum / (b - a + 1) * u));
+        }
+        pts[cols] = new Point(cols * u, bmpH);
+        pts[cols + 1] = new Point(0, bmpH);
+        Rectangle area = new Rectangle(0, bmpH - (Cap + 14) * u, cols * u, (Cap + 14) * u);
+        using (LinearGradientBrush br = new LinearGradientBrush(area, Color.White, Color.White, LinearGradientMode.Vertical))
+        {
+            ColorBlend cb = new ColorBlend();
+            cb.Colors = new Color[] { Color.White, Color.FromArgb(237, 245, 255), Color.FromArgb(204, 222, 242) };
+            cb.Positions = new float[] { 0f, 0.65f, 1f };
+            br.InterpolationColors = cb;
+            pg.FillPolygon(br, pts);
         }
     }
 
     bool IsFull()
     {
         int n = 0;
-        for (int i = 0; i < cols; i++) if (h[i] >= cap[i] - TopBand - 2) n++;
+        for (int i = 0; i < cols; i++) if (h[i] >= cap[i] - 3) n++;
         return n >= cols * 0.85f;
     }
 
@@ -857,11 +864,11 @@ class PileForm : Form
         // 눈이 덜 내리면(낮은 띠·적은 양) 그만큼 느리게 쌓인다. 가득 차면 더는 안 자란다.
         float ratio = SnowForm.BandRatio[band];
         float fillSeconds = 360f / (AmountFactor[Amount] * ratio);
-        debt += dt * cols * Cap / (fillSeconds * 18f);
+        debt += dt * cols * Cap / (fillSeconds * 30f);
         if (debt > 50f) debt = 50f;
         bool landed = false;
         while (debt >= 1f) { debt -= 1f; Land(); landed = true; }
-        if (landed) dirty = true;
+        if (landed) { RenderPile(); dirty = true; }
 
         // 가득 찼고 제설차·루돌프가 없고 마지막 방문이 10분 넘었으면 루돌프가 빼꼼
         if (!plowing && !rud && landed && (!peeked || clock - lastPeek > 600f) && IsFull())
@@ -909,7 +916,7 @@ class PileForm : Form
                         if (sparks.Count < 400 && rnd.NextDouble() < 0.5) AddSpray(i, k);
                     h[i] = 0;
                 }
-                pg.FillRectangle(KeyBrush, cleared * u, 0, (front - cleared) * u, bmpH);
+                RenderPile();
                 cleared = front;
                 dirty = true;
             }
