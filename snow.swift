@@ -11,8 +11,9 @@ enum Amount: Int, CaseIterable {
 }
 
 // 눈 내리는 높이 = 화면 위에서부터 이 비율까지 (아래쪽은 서서히 사라진다). 메뉴에서 고른다.
-let bandChoices: [(title: String, ratio: CGFloat)] = [("1/5", 0.2), ("1/3", 0.33), ("1/2", 0.5), ("Full screen", 1.0)]
-var bandIndex = UserDefaults.standard.object(forKey: "band") as? Int ?? 1
+let bandChoices: [(title: String, ratio: CGFloat)] = [("1/8", 0.125), ("1/5", 0.2), ("1/3", 0.33), ("1/2", 0.5), ("Full screen", 1.0)]
+// 1/8 이 맨 앞에 생기면서 저장 키를 "height" 로 바꿨다. 예전 "band" 값은 한 칸 밀어서 이어 쓴다 (기본 1/3)
+var bandIndex = UserDefaults.standard.object(forKey: "height") as? Int ?? ((UserDefaults.standard.object(forKey: "band") as? Int).map { $0 + 1 } ?? 2)
 // 산타 속도(pt/초). 메뉴에서 고른다.
 let santaSpeeds: [(title: String, speed: CGFloat)] = [("Slow", 110), ("Normal", 170), ("Fast", 260)]
 var santaSpeedIndex = UserDefaults.standard.object(forKey: "santaSpeed") as? Int ?? 1
@@ -1079,15 +1080,20 @@ func makeBubble(_ message: String, on sprite: CALayer, root: CALayer, scale: CGF
     let s = sprite.bounds.size
     let sf = sprite.presentation()?.frame ?? sprite.frame
     let above = sf.maxY + 14 + box.bounds.height <= root.bounds.height
+    // 위·아래 다 자리가 없으면(눈 높이 1/8 등) 캐릭터 옆에 띄운다
+    let side = !above && sf.minY - 14 - box.bounds.height < 0
     // 화면 왼쪽·오른쪽 끝에서도 말풍선이 잘리지 않게 안쪽으로 민다
-    let bx = min(max(6, 8 - sf.minX), root.bounds.width - 8 - box.bounds.width - sf.minX)
-    box.position = CGPoint(x: bx, y: above ? s.height + 14 : -14 - box.bounds.height)
+    let bx = min(max(side ? s.width + 12 : 6, 8 - sf.minX), root.bounds.width - 8 - box.bounds.width - sf.minX)
+    let by = side ? min(max((s.height - box.bounds.height) / 2, 4 - sf.minY), root.bounds.height - 4 - box.bounds.height - sf.minY)
+                  : (above ? s.height + 14 : -14 - box.bounds.height)
+    box.position = CGPoint(x: bx, y: by)
     // 말꼬리 = 산타 쪽 모서리에 붙은 흰 마름모
     let tail = CALayer()
     tail.backgroundColor = white
     tail.bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
     // 꼬리는 말풍선이 화면 끝에서 밀려나도 캐릭터 쪽을 가리키게
-    tail.position = CGPoint(x: min(max(14, min(20, s.width / 2) - bx), box.bounds.width - 14), y: above ? 1 : box.bounds.height - 1)
+    tail.position = side ? CGPoint(x: bx > 0 ? 1 : box.bounds.width - 1, y: box.bounds.height / 2)
+                         : CGPoint(x: min(max(14, min(20, s.width / 2) - bx), box.bounds.width - 14), y: above ? 1 : box.bounds.height - 1)
     tail.setAffineTransform(CGAffineTransform(rotationAngle: .pi / 4))
     box.insertSublayer(tail, below: label)
     sprite.addSublayer(box)
@@ -1126,7 +1132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         status.button?.title = "❄︎"
         buildMenu()
-        if stageMode { bandIndex = 2; santaSpeedIndex = 2; amount = .normal }
+        if stageMode { bandIndex = 3; santaSpeedIndex = 2; amount = .normal }
         rebuild()
         if stageMode { stage(); return }
         NotificationCenter.default.addObserver(self, selector: #selector(rebuild),
@@ -1320,7 +1326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func pickBand(_ sender: NSMenuItem) {
         bandIndex = sender.tag
-        UserDefaults.standard.set(bandIndex, forKey: "band")
+        UserDefaults.standard.set(bandIndex, forKey: "height")
         rebuild()
         buildMenu()
     }

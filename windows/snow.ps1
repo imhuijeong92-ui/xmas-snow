@@ -148,8 +148,8 @@ class Spark
 
 class SnowForm : Form
 {
-    public static readonly string[] BandName = { "1/5", "1/3", "1/2", "Full screen" };
-    public static readonly float[] BandRatio = { 0.2f, 0.33f, 0.5f, 1f };  // 화면 위에서부터 이 비율까지만 내린다
+    public static readonly string[] BandName = { "1/8", "1/5", "1/3", "1/2", "Full screen" };
+    public static readonly float[] BandRatio = { 0.125f, 0.2f, 0.33f, 0.5f, 1f };  // 화면 위에서부터 이 비율까지만 내린다
     static readonly float[] Rate = { 0.004f, 0.012f, 0.03f };    // 화면 폭 1pt 당 초당 눈송이 수
     static readonly float[] Weight = { 0.5f, 0.35f, 0.15f };     // 점·중간·큰 눈꽃 비율
     static readonly float[] Speed = { 30f, 40f, 50f };           // pt/초
@@ -572,8 +572,8 @@ class SnowForm : Form
             if (!wk.Caught) g.DrawImageUnscaled(walkerBmp[wk.Kind], (int)p.X, (int)p.Y);
             if (bubbleT > 0 && bubbleOwner == wk)
             {
-                if (wk.Kind == 2) DrawBubble(g, p, walkerBmp[2].Height, "Your wish will come true!", ShootingStarRows, "Segoe UI");
-                else DrawBubble(g, p, walkerBmp[wk.Kind].Height);
+                if (wk.Kind == 2) DrawBubble(g, p, walkerBmp[2].Height, "Your wish will come true!", ShootingStarRows, "Segoe UI", walkerBmp[2].Width);
+                else DrawBubble(g, p, walkerBmp[wk.Kind].Height, walkerBmp[wk.Kind].Width);
             }
         }
         foreach (Gift gf in gifts) g.DrawImageUnscaled(giftBmp[gf.Kind], (int)gf.X, (int)gf.Y);
@@ -595,7 +595,7 @@ class SnowForm : Form
                 using (SolidBrush b = new SolidBrush(Color.FromArgb(255, 120, 120)))
                     g.FillRectangle(b, (int)p.X + santaBmp.Width - c * 2, (int)p.Y + c * 5 - c / 2, c * 2, c * 2);
             }
-            if (bubbleT > 0 && bubbleOwner == this) DrawBubble(g, p, santaBmp.Height);
+            if (bubbleT > 0 && bubbleOwner == this) DrawBubble(g, p, santaBmp.Height, santaBmp.Width);
         }
     }
 
@@ -603,18 +603,18 @@ class SnowForm : Form
 
     // 흰 둥근 말풍선 — 산타·눈사람·펭귄을 따라다닌다. 위에 자리가 없으면 아래에 띄운다.
     // 투명 처리 바탕색(자홍)과 섞이지 않게 도형은 안티앨리어싱 없이 그린다.
-    void DrawBubble(Graphics g, PointF p, int spriteH)
+    void DrawBubble(Graphics g, PointF p, int spriteH, int spriteW)
     {
-        DrawBubble(g, p, spriteH, "Merry Christmas!", Tree, "Segoe UI");
+        DrawBubble(g, p, spriteH, "Merry Christmas!", Tree, "Segoe UI", spriteW);
     }
 
-    void DrawBubble(Graphics g, PointF p, int spriteH, string text, string[] Tree, string fontName)
+    void DrawBubble(Graphics g, PointF p, int spriteH, string text, string[] Tree, string fontName, int spriteW)
     {
-        DrawBubbleAt(g, p, spriteH, text, Tree, fontName, scale, Width);
+        DrawBubbleAt(g, p, spriteH, text, Tree, fontName, scale, Width, Height, spriteW);
     }
 
     // 쌓인 눈 창의 루돌프 말풍선도 같은 모양으로 쓰도록 static
-    public static void DrawBubbleAt(Graphics g, PointF p, int spriteH, string text, string[] Tree, string fontName, float scale, int Width)
+    public static void DrawBubbleAt(Graphics g, PointF p, int spriteH, string text, string[] Tree, string fontName, float scale, int Width, int Height, int spriteW)
     {
         int tc = Math.Max(1, (int)Math.Round(2 * scale));  // 트리 픽셀 한 칸
         int treeW = Tree[0].Length * tc, treeH = Tree.Length * tc;
@@ -629,6 +629,13 @@ class SnowForm : Form
             int y = (int)p.Y - gap - bh;
             bool above = y >= 0;
             if (!above) y = (int)p.Y + spriteH + gap;
+            // 위·아래 다 자리가 없으면(눈 높이 1/8 등) 캐릭터 옆에 띄운다
+            bool side = !above && y + bh > Height;
+            if (side)
+            {
+                x = Math.Max((int)(8 * scale), Math.Min((int)p.X + spriteW + (int)(12 * scale), Width - bw - (int)(8 * scale)));
+                y = Math.Max((int)(4 * scale), Math.Min((int)p.Y + (spriteH - bh) / 2, Height - bh - (int)(4 * scale)));
+            }
 
             g.SmoothingMode = SmoothingMode.None;
             Color edge = Color.FromArgb(214, 214, 220);  // 흰 창 위에서도 보이는 옅은 테두리
@@ -638,7 +645,12 @@ class SnowForm : Form
             {
                 // 말꼬리 = 산타 쪽 모서리에 붙은 흰 삼각형
                 int t = (int)(6 * scale), tx = Math.Max(x + 2 * t, Math.Min((int)p.X + (int)(20 * scale), x + bw - 2 * t));  // 말풍선이 밀려나도 캐릭터 쪽을 가리키게
-                Point[] tail = above
+                bool leftOfBubble = x > (int)p.X;  // 옆 말풍선: 캐릭터가 말풍선 왼쪽에 있으면 꼬리도 왼쪽
+                int my = y + bh / 2;
+                Point[] tail = side
+                    ? (leftOfBubble ? new Point[] { new Point(x + 2, my - t), new Point(x + 2, my + t), new Point(x - t, my) }
+                                    : new Point[] { new Point(x + bw - 2, my - t), new Point(x + bw - 2, my + t), new Point(x + bw + t, my) })
+                    : above
                     ? new Point[] { new Point(tx - t, y + bh - 2), new Point(tx + t, y + bh - 2), new Point(tx - t / 2, y + bh + t) }
                     : new Point[] { new Point(tx - t, y + 2), new Point(tx + t, y + 2), new Point(tx - t / 2, y - t) };
                 g.FillPolygon(fill, tail);
@@ -1005,7 +1017,7 @@ class PileForm : Form
             g.DrawImageUnscaled(b, (int)plowX, Height - b.Height - bounce);
         }
         if (rud && rudT >= 0.5f && rudT < 7.5f)
-            SnowForm.DrawBubbleAt(g, rp, rudBmp.Height, "Time to clear the snow? ❄️", SnowForm.Tree, "Segoe UI", scale, Width);
+            SnowForm.DrawBubbleAt(g, rp, rudBmp.Height, "Time to clear the snow? ❄️", SnowForm.Tree, "Segoe UI", scale, Width, Height, rudBmp.Width);
     }
 }
 
@@ -1031,7 +1043,8 @@ class Controller
     {
         RegistryKey k = Registry.CurrentUser.CreateSubKey(RegPath);
         amount = Math.Min(2, Math.Max(0, (int)k.GetValue("amount", 0)));
-        band = Math.Min(3, Math.Max(0, (int)k.GetValue("band", 1)));
+        // 1/8 이 맨 앞에 생기면서 저장 값을 "height" 로 바꿨다. 예전 "band" 값은 한 칸 밀어서 이어 쓴다 (기본 1/3)
+        band = Math.Min(4, Math.Max(0, (int)k.GetValue("height", (int)k.GetValue("band", 1) + 1)));
         santaOn = (int)k.GetValue("santa", 1) == 1;
         snowmanOn = (int)k.GetValue("snowman", 1) == 1;
         penguinOn = (int)k.GetValue("penguin", 1) == 1;
@@ -1142,7 +1155,7 @@ class Controller
     {
         RegistryKey k = Registry.CurrentUser.CreateSubKey(RegPath);
         k.SetValue("amount", amount, RegistryValueKind.DWord);
-        k.SetValue("band", band, RegistryValueKind.DWord);
+        k.SetValue("height", band, RegistryValueKind.DWord);
         k.SetValue("santa", santaOn ? 1 : 0, RegistryValueKind.DWord);
         k.SetValue("snowman", snowmanOn ? 1 : 0, RegistryValueKind.DWord);
         k.SetValue("penguin", penguinOn ? 1 : 0, RegistryValueKind.DWord);

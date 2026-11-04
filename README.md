@@ -27,7 +27,7 @@ Click ❄︎ in the menu bar (macOS) or right-click the ❄ tray icon (Windows):
 | Menu | Options |
 |---|---|
 | Snow amount | Light / Normal / Heavy |
-| Snow height | 1/5 / 1/3 / 1/2 / Full screen (measured from the top) |
+| Snow height | 1/8 / 1/5 / 1/3 / 1/2 / Full screen (measured from the top) |
 | Fall speed | Slow / Normal / Fast |
 | Falling treats | Turn each treat on or off |
 | Snow piles up | Turn the snow pile on or off. Click the pile any time to clear it |
