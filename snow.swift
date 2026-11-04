@@ -251,7 +251,7 @@ let reindeer = [
     "................",
 ]
 
-func spriteImage(_ rows: [String]) -> CGImage {
+func spriteImage(_ rows: [String], outline: Bool = true) -> CGImage {
     let h = rows.count, w = rows[0].count, W = w + 2, H = h + 2
     let ctx = CGContext(data: nil, width: W, height: H, bitsPerComponent: 8, bytesPerRow: 0,
                         space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
@@ -260,12 +260,12 @@ func spriteImage(_ rows: [String]) -> CGImage {
         guard y >= 0, y < h, x >= 0, x < w else { return "." }
         return cells[y][x]
     }
-    for y in -1...h { for x in -1...w where at(x, y) == "." {
+    if outline { for y in -1...h { for x in -1...w where at(x, y) == "." {
         if at(x + 1, y) != "." || at(x - 1, y) != "." || at(x, y + 1) != "." || at(x, y - 1) != "." {
             ctx.setFillColor(CGColor(red: 0.2, green: 0.16, blue: 0.16, alpha: 0.45))  // 밝은 창 위에서도 보이게
             ctx.fill(CGRect(x: x + 1, y: H - (y + 2), width: 1, height: 1))
         }
-    } }
+    } } }
     for y in 0..<h { for x in 0..<w {
         guard let c = spritePalette[cells[y][x]] else { continue }
         ctx.setFillColor(CGColor(red: c.0, green: c.1, blue: c.2, alpha: 1))
@@ -714,7 +714,7 @@ let peekDeer = spriteImage([
     "...BBTTTTTTBB...",
     "...BBBBBBBBBB...",
     "....bb....bb....",
-])
+], outline: false)
 
 final class PileWindow: NSPanel {
     let pile = CALayer()

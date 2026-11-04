@@ -781,7 +781,7 @@ class PileForm : Form
         b[8] = PlowRowB;
         plowBmp[0] = Art.Sprite(PlowA, pc, Art.SpriteEdge);
         plowBmp[1] = Art.Sprite(b, pc, Art.SpriteEdge);
-        rudBmp = Art.Sprite(RudolphRows, Math.Max(1, (int)Math.Round(4 * scale)), Art.SpriteEdge);
+        rudBmp = Art.Sprite(RudolphRows, Math.Max(1, (int)Math.Round(4 * scale)), Art.Key);  // 루돌프는 회색 테두리 없이
     }
 
     protected override void Dispose(bool disposing)
