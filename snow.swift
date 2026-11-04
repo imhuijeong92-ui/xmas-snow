@@ -7,7 +7,7 @@ import QuartzCore
 enum Amount: Int, CaseIterable {
     case light = 0, normal, heavy
     var title: String { ["Light", "Normal", "Heavy"][rawValue] }
-    var rate: Float { [0.004, 0.012, 0.03][rawValue] }  // 화면 폭 1pt 당 초당 눈송이 수
+    var rate: Float { [0.002, 0.012, 0.03][rawValue] }  // 화면 폭 1pt 당 초당 눈송이 수
 }
 
 // 눈 내리는 높이 = 화면 위에서부터 이 비율까지 (아래쪽은 서서히 사라진다). 메뉴에서 고른다.
@@ -722,13 +722,15 @@ final class PileWindow: NSPanel {
     var heights: [Int] = []        // 칸마다 쌓인 눈 꼭대기 (그림 칸 단위)
     var capMap: [Int] = []         // 칸마다 더 쌓이지 않는 한도 — 다 차도 윗면이 일자가 아니라 둔덕지게
     var carry: CGFloat = 0
-    var amountFactor: CGFloat = 1  // Light 0.5 · Normal 1 · Heavy 2
+    var amountFactor: CGFloat = 1  // Light 0.25 · Normal 1 · Heavy 2
     var plow: CALayer?
     var deer: CALayer?
     var lastPeek: Date?
     var growTimer: Timer?
     var hoverTimer: Timer?
-    let front: NSPanel             // 제설차·루돌프·말풍선은 독 앞에 보이도록 위층 창에
+    var dockUp = false             // 커서가 화면 아래 끝에 닿아 독이 올라온 상태 — 이때 독 높이 안의 클릭은 독 몫
+    let dockBand: CGFloat
+    let front: NSPanel            // 제설차·루돌프·말풍선은 독 앞에 보이도록 위층 창에
     var frontRoot: CALayer { front.contentView!.layer! }
     // 다 차는 데 걸리는 시간 = 6분 ÷ (눈 양 × 눈 높이 비율) → 눈이 적게 내리면 그만큼 천천히 쌓인다
     var fillSeconds: CGFloat { 360 / (amountFactor * bandRatio) }
@@ -742,6 +744,12 @@ final class PileWindow: NSPanel {
         let f = screen.frame
         let rect = NSRect(x: f.minX, y: f.minY, width: f.width, height: 160)
         front = NSPanel(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        // 독 높이 = 아이콘 크기(확대 켜면 확대 크기) + 위아래 여백. 독이 옆에 붙어 있으면 아래 클릭과 겹치지 않는다
+        let dock = UserDefaults(suiteName: "com.apple.dock")
+        let side = (dock?.string(forKey: "orientation") ?? "bottom") != "bottom"
+        let tile = CGFloat(dock?.object(forKey: "tilesize") as? Double ?? 48)
+        let big = dock?.bool(forKey: "magnification") == true ? CGFloat(dock?.object(forKey: "largesize") as? Double ?? 64) : 0
+        dockBand = side ? 0 : max(tile, big) + 28
         super.init(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         self.amountFactor = amountFactor
         hidesOnDeactivate = false
@@ -800,6 +808,10 @@ final class PileWindow: NSPanel {
             guard let self = self else { return }
             let m = NSEvent.mouseLocation
             let p = CGPoint(x: m.x - self.frame.minX, y: m.y - self.frame.minY)
+            // 독처럼 판단: 아래 끝에 닿으면 독이 올라오고, 독 높이 위로 벗어나거나 다른 화면으로 가면 내려간다
+            let here = p.x >= 0 && p.x < self.frame.width
+            if here && p.y <= 1 && self.dockBand > 0 { self.dockUp = true }
+            if !here || p.y > self.dockBand { self.dockUp = false }
             self.front.ignoresMouseEvents = !self.onDeer(p)
             self.ignoresMouseEvents = !self.onPile(p)
         }
@@ -818,7 +830,7 @@ final class PileWindow: NSPanel {
 
     func onPile(_ p: CGPoint) -> Bool {
         let i = Int(p.x / pilePx)
-        guard plow == nil, i >= 0, i < heights.count, heights[i] >= 3 else { return false }
+        guard plow == nil, i >= 0, i < heights.count, heights[i] >= 3, !(dockUp && p.y <= dockBand) else { return false }
         return p.y >= 0 && p.y <= CGFloat(heights[i]) * pilePx + 6
     }
 
@@ -1117,7 +1129,7 @@ func makeBubble(_ message: String, on sprite: CALayer, root: CALayer, scale: CGF
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var windows: [SnowWindow] = []
     var piles: [PileWindow] = []
-    var amountFactor: CGFloat { [0.5, 1, 2][amount.rawValue] }
+    var amountFactor: CGFloat { [0.25, 1, 2][amount.rawValue] }
     var status: NSStatusItem!
     var amount = Amount(rawValue: UserDefaults.standard.integer(forKey: "amount")) ?? .light
     var santaOn = UserDefaults.standard.object(forKey: "santa") as? Bool ?? true
