@@ -822,7 +822,50 @@ final class PileWindow: NSPanel {
     }
 
     func clicked(at p: CGPoint) {
-        if onDeer(p) || onPile(p) { hideDeer(); sendPlow() }
+        if onDeer(p) || onPile(p) { puff(at: p); hideDeer(); sendPlow() }
+    }
+
+    // 누른 자리에서 바로 '퐁' — 하얀 고리가 퍼지고 눈꽃이 위로 튀어 오른다 (눌렸다는 걸 바로 알게)
+    func puff(at c: CGPoint) {
+        let root = frontRoot
+        let ring = CALayer()
+        ring.bounds = CGRect(x: 0, y: 0, width: 36, height: 36)
+        ring.position = c
+        ring.cornerRadius = 18
+        ring.borderColor = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+        ring.borderWidth = 3
+        ring.opacity = 0
+        root.addSublayer(ring)
+        let grow = CABasicAnimation(keyPath: "transform.scale")
+        grow.fromValue = 0.3; grow.toValue = 1.8
+        let fadeOut = CABasicAnimation(keyPath: "opacity")
+        fadeOut.fromValue = 0.9; fadeOut.toValue = 0
+        let g = CAAnimationGroup()
+        g.animations = [grow, fadeOut]; g.duration = 0.35
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { ring.removeFromSuperlayer() }
+        ring.add(g, forKey: "pop")
+        CATransaction.commit()
+
+        let burst = CAEmitterLayer()
+        burst.frame = root.bounds
+        burst.emitterPosition = c
+        burst.emitterShape = .point
+        burst.emitterCells = [flakeImages[0], flakeImages[1], flakeImages[2]].map { img in
+            let e = CAEmitterCell()
+            e.contents = img
+            e.magnificationFilter = CALayerContentsFilter.nearest.rawValue
+            e.scale = 1.8; e.scaleRange = 0.5
+            e.birthRate = 60; e.lifetime = 0.9; e.lifetimeRange = 0.3
+            e.velocity = 170; e.velocityRange = 70
+            e.emissionLongitude = .pi / 2; e.emissionRange = .pi / 2.2   // 위쪽으로 퍼진다
+            e.yAcceleration = -420; e.spinRange = 5; e.alphaSpeed = -1
+            return e
+        }
+        burst.beginTime = CACurrentMediaTime()
+        root.addSublayer(burst)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { burst.birthRate = 0 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { burst.removeFromSuperlayer() }
     }
 
     // 눈꽃(점·중간·큰)을 하나씩 떨궈 그 자리 눈 더미 위에 살짝 파묻히게 얹는다. 정해진 높이를 넘으면 안 얹는다
@@ -1094,7 +1137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if CommandLine.arguments.contains("--demo4") {  // 눈 더미 채워 두고 제설차
             piles.forEach { p in p.carry = 9000; p.grow(0) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.piles.forEach { $0.hideDeer() }; self.callPlow() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.piles.forEach { $0.puff(at: CGPoint(x: 300, y: 30)); $0.hideDeer() }; self.callPlow() }
         }
         if CommandLine.arguments.contains("--demo") {
             callSanta()

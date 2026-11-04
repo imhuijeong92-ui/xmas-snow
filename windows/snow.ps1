@@ -892,7 +892,7 @@ class PileForm : Form
                 float top = Top + Height - h[ci] * u - 6 * scale;  // 눈 높이 + 여유 6px
                 if (c.Y >= top && c.Y <= Top + Height) hit = true;
             }
-            if (hit) StartPlow();
+            if (hit) { Puff(c.X - Left, c.Y - Top); StartPlow(); }
         }
         wasDown = down;
 
@@ -927,6 +927,25 @@ class PileForm : Form
         }
 
         if (dirty || plowing || rud || sparks.Count > 0) { dirty = false; Invalidate(); }
+    }
+
+    // 누른 자리에서 바로 '퐁' — 눈가루가 위로 튀어 올라 눌렸다는 걸 바로 알게 한다
+    void Puff(int x, int y)
+    {
+        for (int n = 0; n < 40 && sparks.Count < 400; n++)
+        {
+            Spark s = new Spark();
+            s.Col = rnd.Next(3) == 0 ? PileEdge : Color.White;
+            s.Size = Math.Max(1, (int)Math.Round((2 + rnd.Next(2)) * scale));
+            s.X = x; s.Y = y;
+            double a = -Math.PI / 2 + (rnd.NextDouble() - 0.5) * Math.PI * 0.9;  // 위쪽으로 부채꼴
+            float v = (100 + (float)rnd.NextDouble() * 160) * scale;
+            s.VX = (float)Math.Cos(a) * v;
+            s.VY = (float)Math.Sin(a) * v;
+            s.Life = 0.6f + (float)rnd.NextDouble() * 0.4f;
+            sparks.Add(s);
+        }
+        dirty = true;
     }
 
     // 날 앞에서 위·앞쪽으로 튀는 작은 눈가루
