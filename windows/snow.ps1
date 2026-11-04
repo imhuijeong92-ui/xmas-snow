@@ -3,6 +3,8 @@
 # 윈도우 10/11 기본 PowerShell 5.1 + .NET Framework 로 실행 시 컴파일한다(C# 5 문법만 쓸 것).
 # ⚠ 이 파일은 UTF-8 BOM 으로 저장해야 한글이 안 깨진다.
 
+# 창 없이 실행되므로, 시작하다 실패하면 이유를 창으로 띄우고 같은 폴더 error.txt 에 남긴다 (친구 PC 문제 확인용)
+try {
 Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
 using System;
 using System.Collections.Generic;
@@ -1256,3 +1258,10 @@ class Controller
 '@
 
 [XmasSnow]::Run()
+} catch {
+    $msg = ($_ | Out-String)
+    $log = Join-Path $PSScriptRoot 'error.txt'
+    $msg | Out-File -Encoding utf8 $log
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.MessageBox]::Show("Xmas Snow couldn't start.`n`n$msg`nSaved to: $log", 'Xmas Snow') | Out-Null
+}
