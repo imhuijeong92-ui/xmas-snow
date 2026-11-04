@@ -637,7 +637,7 @@ class SnowForm : Form
             using (Pen pen = new Pen(edge, Math.Max(1, (int)scale)))
             {
                 // 말꼬리 = 산타 쪽 모서리에 붙은 흰 삼각형
-                int tx = x + (int)(20 * scale), t = (int)(6 * scale);
+                int t = (int)(6 * scale), tx = Math.Max(x + 2 * t, Math.Min((int)p.X + (int)(20 * scale), x + bw - 2 * t));  // 말풍선이 밀려나도 캐릭터 쪽을 가리키게
                 Point[] tail = above
                     ? new Point[] { new Point(tx - t, y + bh - 2), new Point(tx + t, y + bh - 2), new Point(tx - t / 2, y + bh + t) }
                     : new Point[] { new Point(tx - t, y + 2), new Point(tx + t, y + 2), new Point(tx - t / 2, y - t) };
@@ -699,20 +699,25 @@ class PileForm : Form
         ".KKYKK......KKYKK.....RW",
         "..KKK........KKK.......W" };
     const string PlowRowB = "RGRYRGRYRGRYRGRYRR..RW..";  // 반짝이 전구 줄 반대 순서
-    static readonly string[] RudolphRows = {
-        "b..b......b..b",
-        "bbbb......bbbb",
-        ".bb........bb.",
-        "..BBBBBBBBBB..",
-        "TBBBBBBBBBBBBT",
-        ".BBKWBBBBKWBB.",
-        ".BBKKBBBBKKBB.",
-        ".BBBBBBBBBBBB.",
-        "..BBTTNNTTBB..",
-        "..BTTNNNNTTB..",
-        "..BTTNNNNTTB..",
-        "...TTTNNTTT...",
-        "....TTTTTT...." };
+    static readonly string[] RudolphRows = {  // Clawd 크리스마스 테마의 루돌프와 같은 그림
+        ".b.b........b.b.",
+        ".bbb........bbb.",
+        "..b..........b..",
+        "...bb......bb...",
+        "....BBBBBBBB....",
+        "BB.BBBBBBBBBB.BB",
+        ".BBBBKBBBBKBBBB.",
+        "...BBBBBBBBBB...",
+        "...BBTTTTTTBB...",
+        "...BTTTNNTTTB...",
+        "...BTTTNNTTTB...",
+        "....BTTTTTTB....",
+        "...GGGGGGGGGG...",
+        "...BBBBYYBBBB...",
+        "...BBTTTTTTBB...",
+        "...BBTTTTTTBB...",
+        "...BBBBBBBBBB...",
+        "....bb....bb...." };
 
     readonly Random rnd;
     readonly float scale;

@@ -694,21 +694,26 @@ let plowRows = [
 ]
 let plowSprites = [spriteImage(plowRows),
                    spriteImage(plowRows.enumerated().map { $0.offset == 8 ? "RGRYRGRYRGRYRGRYRR" + $0.element.dropFirst(18) : $0.element })]
-// 눈이 다 차면 오른쪽 끝에서 빼꼼 나와 "치울까?" 하고 묻는 루돌프 (정면 얼굴)
+// 눈이 다 차면 오른쪽 끝에서 빼꼼 나와 "치울까?" 하고 묻는 루돌프 (Clawd 크리스마스 테마의 루돌프와 같은 그림)
 let peekDeer = spriteImage([
-    "b..b......b..b",
-    "bbbb......bbbb",
-    ".bb........bb.",
-    "..BBBBBBBBBB..",
-    "TBBBBBBBBBBBBT",
-    ".BBKWBBBBKWBB.",
-    ".BBKKBBBBKKBB.",
-    ".BBBBBBBBBBBB.",
-    "..BBTTNNTTBB..",
-    "..BTTNNNNTTB..",
-    "..BTTNNNNTTB..",
-    "...TTTNNTTT...",
-    "....TTTTTT....",
+    ".b.b........b.b.",
+    ".bbb........bbb.",
+    "..b..........b..",
+    "...bb......bb...",
+    "....BBBBBBBB....",
+    "BB.BBBBBBBBBB.BB",
+    ".BBBBKBBBBKBBBB.",
+    "...BBBBBBBBBB...",
+    "...BBTTTTTTBB...",
+    "...BTTTNNTTTB...",
+    "...BTTTNNTTTB...",
+    "....BTTTTTTB....",
+    "...GGGGGGGGGG...",
+    "...BBBBYYBBBB...",
+    "...BBTTTTTTBB...",
+    "...BBTTTTTTBB...",
+    "...BBBBBBBBBB...",
+    "....bb....bb....",
 ])
 
 final class PileWindow: NSPanel {
@@ -1029,7 +1034,8 @@ func makeBubble(_ message: String, on sprite: CALayer, root: CALayer, scale: CGF
     let tail = CALayer()
     tail.backgroundColor = white
     tail.bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
-    tail.position = CGPoint(x: 20, y: above ? 1 : box.bounds.height - 1)
+    // 꼬리는 말풍선이 화면 끝에서 밀려나도 캐릭터 쪽을 가리키게
+    tail.position = CGPoint(x: min(max(14, min(20, s.width / 2) - bx), box.bounds.width - 14), y: above ? 1 : box.bounds.height - 1)
     tail.setAffineTransform(CGAffineTransform(rotationAngle: .pi / 4))
     box.insertSublayer(tail, below: label)
     sprite.addSublayer(box)
