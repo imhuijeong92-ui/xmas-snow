@@ -152,7 +152,7 @@ class SnowForm : Form
 {
     public static readonly string[] BandName = { "1/8", "1/5", "1/3", "1/2", "Full screen" };
     public static readonly float[] BandRatio = { 0.125f, 0.2f, 0.33f, 0.5f, 1f };  // 화면 위에서부터 이 비율까지만 내린다
-    static readonly float[] Rate = { 0.002f, 0.012f, 0.03f };    // 화면 폭 1pt 당 초당 눈송이 수
+    static readonly float[] Rate = { 0.002f, 0.005f, 0.03f };    // 화면 폭 1pt 당 초당 눈송이 수
     static readonly float[] Weight = { 0.5f, 0.35f, 0.15f };     // 점·중간·큰 눈꽃 비율
     static readonly float[] Speed = { 30f, 40f, 50f };           // pt/초
 

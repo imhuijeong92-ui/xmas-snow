@@ -7,7 +7,7 @@ import QuartzCore
 enum Amount: Int, CaseIterable {
     case light = 0, normal, heavy
     var title: String { ["Light", "Normal", "Heavy"][rawValue] }
-    var rate: Float { [0.002, 0.012, 0.03][rawValue] }  // 화면 폭 1pt 당 초당 눈송이 수
+    var rate: Float { [0.002, 0.005, 0.03][rawValue] }  // 화면 폭 1pt 당 초당 눈송이 수
 }
 
 // 눈 내리는 높이 = 화면 위에서부터 이 비율까지 (아래쪽은 서서히 사라진다). 메뉴에서 고른다.
