@@ -30,7 +30,7 @@ Click ❄︎ in the menu bar (macOS) or right-click the ❄ tray icon (Windows):
 | Snow height | 1/5 / 1/3 / 1/2 / Full screen (measured from the top) |
 | Fall speed | Slow / Normal / Fast |
 | Falling treats | Turn each treat on or off |
-| Snow piles up | Turn the snow pile on or off |
+| Snow piles up | Turn the snow pile on or off. Click the pile any time to clear it |
 | Visitors | Turn Santa / Snowman / Penguin / Shooting star on or off |
 | Santa speed | Slow / Normal / Fast |
 | Call now | Summon any visitor or the snowplow right away |

@@ -1231,6 +1231,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(sub("⏬ Fall speed", fallSpeeds.enumerated().map { item($1.title, #selector(pickFallSpeed(_:)), tag: $0, on: $0 == fallSpeedIndex) }))
         m.addItem(sub("🍬 Falling treats", treatGroups.enumerated().map { item($1.title, #selector(toggleTreat(_:)), tag: $0, on: !treatsOff.contains($0)) }))
         m.addItem(item("🏔 Snow piles up", #selector(togglePile), on: pileOn))
+        let tip = NSMenuItem(title: "Tip: click the pile to clear it 🚜", action: nil, keyEquivalent: "")
+        tip.isEnabled = false   // 회색 안내 한 줄 — 쌓인 눈을 누르면 치울 수 있다는 걸 알려 준다
+        tip.indentationLevel = 1
+        m.addItem(tip)
         m.addItem(.separator())
         m.addItem(sub("🛷 Visitors", [item("Santa 🎅", #selector(toggleSanta), on: santaOn),
                                           item("Snowman ⛄", #selector(toggleSnowman), on: snowmanOn),

@@ -1181,6 +1181,9 @@ class Controller
         }
         m.Items.Add(treats);
         m.Items.Add(Item("🏔 Snow piles up", pileOn, delegate { pileOn = !pileOn; Save(); RebuildPiles(); BuildMenu(); }));
+        ToolStripMenuItem tip = new ToolStripMenuItem("    Tip: click the pile to clear it");
+        tip.Enabled = false;  // 회색 안내 한 줄 — 쌓인 눈을 누르면 치울 수 있다는 걸 알려 준다
+        m.Items.Add(tip);
         m.Items.Add(new ToolStripSeparator());
 
         ToolStripMenuItem pals = new ToolStripMenuItem("Visitors");
