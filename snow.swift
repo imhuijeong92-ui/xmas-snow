@@ -660,68 +660,400 @@ extension SnowWindow {
     func showBubble(on sprite: CALayer, text message: String = "Merry Christmas! 🎄") {
         guard let root = contentView?.layer else { return }
         bubble?.removeFromSuperlayer()
-
-        let white = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
-        let base = NSFont.systemFont(ofSize: 15, weight: .heavy)
-        let font = base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: 15) } ?? base
-        let text = NSAttributedString(string: message, attributes: [
-            .font: font,
-            .foregroundColor: NSColor(red: 0.75, green: 0.12, blue: 0.2, alpha: 1)])
-        let ts = text.size()
-        let padX: CGFloat = 12, padY: CGFloat = 6
-
-        // 테두리 없는 흰 둥근 말풍선 + 옅은 그림자 (밝은 창 위에서도 떠 보이게)
-        let box = CALayer()
-        box.anchorPoint = CGPoint(x: 0, y: 0)
-        box.bounds = CGRect(x: 0, y: 0, width: ceil(ts.width) + padX * 2, height: ceil(ts.height) + padY * 2)
-        box.backgroundColor = white
-        box.cornerRadius = box.bounds.height / 2
-        box.shadowColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
-        box.shadowOpacity = 0.25
-        box.shadowRadius = 4
-        box.shadowOffset = CGSize(width: 0, height: -1)
-        let label = CATextLayer()
-        label.string = text
-        label.frame = CGRect(x: padX, y: padY - 1, width: ceil(ts.width) + 2, height: ceil(ts.height))
-        label.contentsScale = backingScaleFactor
-        box.addSublayer(label)
-
-        // 위에 자리가 없으면(눈 높이 1/5 등) 산타 아래에 띄운다
-        let s = sprite.bounds.size
-        let sf = sprite.presentation()?.frame ?? sprite.frame
-        let above = sf.maxY + 14 + box.bounds.height <= root.bounds.height
-        // 화면 왼쪽·오른쪽 끝에서도 말풍선이 잘리지 않게 안쪽으로 민다
-        let bx = min(max(6, 8 - sf.minX), root.bounds.width - 8 - box.bounds.width - sf.minX)
-        box.position = CGPoint(x: bx, y: above ? s.height + 14 : -14 - box.bounds.height)
-        // 말꼬리 = 산타 쪽 모서리에 붙은 흰 마름모
-        let tail = CALayer()
-        tail.backgroundColor = white
-        tail.bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
-        tail.position = CGPoint(x: 20, y: above ? 1 : box.bounds.height - 1)
-        tail.setAffineTransform(CGAffineTransform(rotationAngle: .pi / 4))
-        box.insertSublayer(tail, below: label)
-        sprite.addSublayer(box)
+        let box = makeBubble(message, on: sprite, root: root, scale: backingScaleFactor)
         bubble = box
-
-        let pop = CAKeyframeAnimation(keyPath: "transform.scale")
-        pop.values = [0.3, 1.15, 1]
-        pop.keyTimes = [0, 0.6, 1]
-        pop.duration = 0.25
-        box.add(pop, forKey: "pop")
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self, weak box] in
-            guard let box = box else { return }
-            CATransaction.begin()
-            CATransaction.setCompletionBlock { box.removeFromSuperlayer() }
-            box.opacity = 0
-            CATransaction.commit()
-            if self?.bubble === box { self?.bubble = nil }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.8) { [weak self, weak box] in
+            if let box = box, self?.bubble === box { self?.bubble = nil }
         }
     }
 }
 
+// ── 화면 맨 아래(독 뒤)에 눈꽃이 하나씩 쌓이고, 클릭하면 산타 제설차가 지나가며 치운다 ──────────────
+let pilePx: CGFloat = 2        // 쌓인 눈 그림 한 칸 = 2pt (내리는 눈꽃과 같은 크기)
+let pileTopBand = 8            // 맨 윗켜 두께(칸). 여기는 눈꽃을 띄엄띄엄만 얹는다
+let pileCapPx = 22             // 다 찬 높이 평균(44pt). 실제 한도는 자리마다 물결처럼 오르내린다(capMap)
+var pileOn = UserDefaults.standard.object(forKey: "pile") as? Bool ?? true
+// 산타가 탄 빨간 제설차 (오른쪽을 보고 왼→오로 간다). 지붕 꼬마전구가 깜빡이고 앞날은 캔디케인 줄무늬
+let plowRows = [
+    "....W...................",
+    "....RR..................",
+    "....RRR.................",
+    "...WWWWW................",
+    "...FFKFF................",
+    "...WWWWW...............W",
+    "..RRWWWRRG............RW",
+    "..GGGGGGGG...........RW.",
+    "RYRGRYRGRYRGRYRGRR..RW..",
+    "RRRRRRRRRRRRRRRYRR.RW...",
+    "RRRRRRRRRRRRRRYGYRWR....",
+    "RRRRRRRRRRRRRRRYRR.RW...",
+    "GGGGGGGGGGGGGGGGGG..RW..",
+    "..KKK........KKK.....RW.",
+    ".KKYKK......KKYKK.....RW",
+    "..KKK........KKK.......W",
+]
+let plowSprites = [spriteImage(plowRows),
+                   spriteImage(plowRows.enumerated().map { $0.offset == 8 ? "RGRYRGRYRGRYRGRYRR" + $0.element.dropFirst(18) : $0.element })]
+// 눈이 다 차면 오른쪽 끝에서 빼꼼 나와 "치울까?" 하고 묻는 루돌프 (정면 얼굴)
+let peekDeer = spriteImage([
+    "b..b......b..b",
+    "bbbb......bbbb",
+    ".bb........bb.",
+    "..BBBBBBBBBB..",
+    "TBBBBBBBBBBBBT",
+    ".BBKWBBBBKWBB.",
+    ".BBKKBBBBKKBB.",
+    ".BBBBBBBBBBBB.",
+    "..BBTTNNTTBB..",
+    "..BTTNNNNTTB..",
+    "..BTTNNNNTTB..",
+    "...TTTNNTTT...",
+    "....TTTTTT....",
+])
+
+final class PileWindow: NSPanel {
+    let pile = CALayer()
+    var canvas: CGContext!
+    var heights: [Int] = []        // 칸마다 쌓인 눈 꼭대기 (그림 칸 단위)
+    var capMap: [Int] = []         // 칸마다 더 쌓이지 않는 한도 — 다 차도 윗면이 일자가 아니라 둔덕지게
+    var carry: CGFloat = 0
+    var amountFactor: CGFloat = 1  // Light 0.5 · Normal 1 · Heavy 2
+    var plow: CALayer?
+    var deer: CALayer?
+    var lastPeek: Date?
+    var growTimer: Timer?
+    var hoverTimer: Timer?
+    let front: NSPanel             // 제설차·루돌프·말풍선은 독 앞에 보이도록 위층 창에
+    var frontRoot: CALayer { front.contentView!.layer! }
+    // 다 차는 데 걸리는 시간 = 6분 ÷ (눈 양 × 눈 높이 비율) → 눈이 적게 내리면 그만큼 천천히 쌓인다
+    var fillSeconds: CGFloat { 360 / (amountFactor * bandRatio) }
+    var isFull: Bool { heights.indices.filter { heights[$0] >= capMap[$0] - pileTopBand - 2 }.count >= heights.count * 85 / 100 }
+
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+
+    init(screen: NSScreen, amountFactor: CGFloat) {
+        // 화면 맨 아래, 독보다 한 층 아래 → 독 뒤에 쌓이고 독 양옆으로 보인다 (일반 창보다는 위)
+        let f = screen.frame
+        let rect = NSRect(x: f.minX, y: f.minY, width: f.width, height: 160)
+        front = NSPanel(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        super.init(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        self.amountFactor = amountFactor
+        hidesOnDeactivate = false
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false
+        ignoresMouseEvents = true
+        isReleasedWhenClosed = false
+        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)) - 1)
+        collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+
+        let view = ClickView(frame: NSRect(origin: .zero, size: rect.size))
+        view.wantsLayer = true
+        view.onClick = { [weak self] p in self?.clicked(at: p) }
+        contentView = view
+        setFrame(rect, display: false)
+
+        front.hidesOnDeactivate = false
+        front.isOpaque = false
+        front.backgroundColor = .clear
+        front.hasShadow = false
+        front.ignoresMouseEvents = true
+        front.isReleasedWhenClosed = false
+        front.level = .statusBar
+        front.collectionBehavior = collectionBehavior
+        let fv = ClickView(frame: NSRect(origin: .zero, size: rect.size))
+        fv.wantsLayer = true
+        fv.onClick = { [weak self] p in self?.clicked(at: p) }
+        front.contentView = fv
+        front.setFrame(rect, display: false)
+
+        let cols = Int(ceil(rect.width / pilePx)), rows = pileCapPx + 20
+        heights = Array(repeating: 0, count: cols)
+        // 큰 둔덕 + 작은 굴곡을 겹친 물결 (모니터마다 모양이 다르다)
+        let ph = (0..<3).map { _ in CGFloat.random(in: 0..<(2 * .pi)) }
+        capMap = (0..<cols).map { i in
+            let x = CGFloat(i)
+            return pileCapPx + Int((6 * sin(x * 0.016 + ph[0]) + 3 * sin(x * 0.047 + ph[1]) + 1.5 * sin(x * 0.12 + ph[2])).rounded())
+        }
+        canvas = CGContext(data: nil, width: cols, height: rows, bitsPerComponent: 8, bytesPerRow: 0,
+                           space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        pile.anchorPoint = .zero
+        pile.magnificationFilter = .nearest
+        pile.frame = CGRect(x: 0, y: 0, width: CGFloat(cols) * pilePx, height: CGFloat(rows) * pilePx)
+        view.layer?.addSublayer(pile)
+
+        growTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.grow(1) }
+        // 평소엔 클릭이 통과하고, 커서가 쌓인 눈이나 루돌프 위에 있을 때만 클릭을 받는다
+        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            let m = NSEvent.mouseLocation
+            let p = CGPoint(x: m.x - self.frame.minX, y: m.y - self.frame.minY)
+            self.front.ignoresMouseEvents = !self.onDeer(p)
+            self.ignoresMouseEvents = !self.onPile(p)
+        }
+    }
+
+    func stop() {
+        growTimer?.invalidate()
+        hoverTimer?.invalidate()
+        front.orderOut(nil)
+    }
+
+    func show() {
+        orderFrontRegardless()
+        front.orderFrontRegardless()
+    }
+
+    func onPile(_ p: CGPoint) -> Bool {
+        let i = Int(p.x / pilePx)
+        guard plow == nil, i >= 0, i < heights.count, heights[i] >= 3 else { return false }
+        return p.y >= 0 && p.y <= CGFloat(heights[i]) * pilePx + 6
+    }
+
+    func onDeer(_ p: CGPoint) -> Bool {
+        guard let d = deer else { return false }
+        return (d.presentation()?.frame ?? d.frame).insetBy(dx: -6, dy: -6).contains(p)
+    }
+
+    func clicked(at p: CGPoint) {
+        if onDeer(p) || onPile(p) { hideDeer(); sendPlow() }
+    }
+
+    // 눈꽃(점·중간·큰)을 하나씩 떨궈 그 자리 눈 더미 위에 살짝 파묻히게 얹는다. 정해진 높이를 넘으면 안 얹는다
+    func grow(_ dt: CGFloat) {
+        let n = heights.count
+        carry += CGFloat(n * pileCapPx) / (fillSeconds * 18) * dt
+        var changed = false
+        while carry >= 1 {
+            carry -= 1
+            let r = CGFloat.random(in: 0..<1)
+            let img = flakeImages[r < 0.3 ? 0 : (r < 0.75 ? 1 : 2)]
+            let s = img.width
+            for _ in 0..<12 {
+                let x = Int.random(in: -s / 2..<n - s / 2)
+                let span = max(0, x + 1)..<min(n, x + s - 1)
+                guard !span.isEmpty else { continue }
+                let cap = span.map { capMap[$0] }.min() ?? pileCapPx
+                var y = max(0, (span.map { heights[$0] }.max() ?? 0) - s / 3)
+                // 맨 윗켜(한도 아래 8칸)는 빽빽하지 않게: 파묻지 않고, 양옆 2칸까지 다른 눈꽃이 없을 때만 띄엄띄엄 얹는다
+                if y + s - 2 > cap - pileTopBand {
+                    let around = max(0, x - 1)..<min(n, x + s + 1)
+                    if around.contains(where: { heights[$0] > cap - pileTopBand }) { continue }
+                    y = span.map { heights[$0] }.max() ?? 0
+                }
+                if y + s - 2 > cap { continue }
+                canvas.draw(img, in: CGRect(x: x, y: y, width: s, height: s))
+                for c in span { heights[c] = max(heights[c], y + s - 2) }
+                changed = true
+                break
+            }
+        }
+        if changed { redraw() }
+        if plow == nil, deer == nil, isFull, lastPeek.map({ Date().timeIntervalSince($0) > 600 }) ?? true { peek() }
+    }
+
+    func redraw() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        pile.contents = canvas.makeImage()
+        CATransaction.commit()
+    }
+
+    // 루돌프가 오른쪽 끝에서 빼꼼 → "Time to clear the snow?" → 8초 뒤 쏙 들어간다. 루돌프를 눌러도 제설차가 온다
+    func peek() {
+        let root = frontRoot
+        lastPeek = Date()
+        let px: CGFloat = 4
+        let size = CGSize(width: CGFloat(peekDeer.width) * px, height: CGFloat(peekDeer.height) * px)
+        let w = root.bounds.width
+        let d = CALayer()
+        d.contents = peekDeer
+        d.magnificationFilter = .nearest
+        d.bounds = CGRect(origin: .zero, size: size)
+        let y = CGFloat(pileCapPx) * pilePx * 0.6 + size.height / 2
+        d.position = CGPoint(x: w - size.width * 0.32, y: y)
+        root.addSublayer(d)
+        deer = d
+        let slide = CABasicAnimation(keyPath: "position.x")
+        slide.fromValue = w + size.width / 2; slide.toValue = w - size.width * 0.32
+        slide.duration = 0.5; slide.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        d.add(slide, forKey: "in")
+        let bob = CABasicAnimation(keyPath: "position.y")
+        bob.fromValue = y; bob.toValue = y + 3; bob.duration = 0.45
+        bob.autoreverses = true; bob.repeatCount = .infinity; bob.beginTime = CACurrentMediaTime() + 0.5
+        d.add(bob, forKey: "bob")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self, weak d] in
+            guard let self = self, let d = d, self.deer === d else { return }
+            _ = makeBubble("Time to clear the snow? ❄️", on: d, root: root, scale: self.backingScaleFactor, stay: 7)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self, weak d] in
+            guard let self = self, let d = d, self.deer === d else { return }
+            self.hideDeer()
+        }
+    }
+
+    func hideDeer() {
+        guard let d = deer else { return }
+        let root = frontRoot
+        deer = nil
+        let x = (d.presentation() ?? d).position.x
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { d.removeFromSuperlayer() }
+        let out = CABasicAnimation(keyPath: "position.x")
+        out.fromValue = x; out.toValue = root.bounds.width + d.bounds.width
+        out.duration = 0.35; out.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        out.isRemovedOnCompletion = false; out.fillMode = .forwards
+        d.add(out, forKey: "out")
+        CATransaction.commit()
+    }
+
+    func clear() {
+        canvas.clear(CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height))
+        heights = Array(repeating: 0, count: heights.count)
+        redraw()
+    }
+
+    // 왼쪽 끝에서 오른쪽 끝까지 달리며 앞날 뒤쪽 눈을 전부 치우고, 앞으로 눈가루를 튀긴다
+    func sendPlow() {
+        guard plow == nil else { return }
+        let root = frontRoot
+        let px: CGFloat = 3
+        let size = CGSize(width: CGFloat(plowSprites[0].width) * px, height: CGFloat(plowSprites[0].height) * px)
+        let w = root.bounds.width, speed: CGFloat = 220
+        let startX = -size.width / 2, endX = w + size.width / 2
+        let duration = Double((endX - startX) / speed)
+
+        let truck = CALayer()
+        truck.contents = plowSprites[0]
+        truck.magnificationFilter = .nearest
+        truck.bounds = CGRect(origin: .zero, size: size)
+        truck.position = CGPoint(x: startX, y: size.height / 2)
+        root.addSublayer(truck)
+        plow = truck
+        let blink = CAKeyframeAnimation(keyPath: "contents")
+        blink.values = plowSprites; blink.calculationMode = .discrete
+        blink.duration = 0.6; blink.repeatCount = .infinity
+        truck.add(blink, forKey: "blink")
+        let bump = CABasicAnimation(keyPath: "position.y")   // 덜컹덜컹
+        bump.fromValue = size.height / 2; bump.toValue = size.height / 2 + 2
+        bump.duration = 0.12; bump.autoreverses = true; bump.repeatCount = .infinity
+        truck.add(bump, forKey: "bump")
+
+        let spray = CAEmitterLayer()
+        spray.frame = root.bounds
+        spray.emitterShape = .point
+        spray.emitterCells = [flakeImages[0], flakeImages[1]].map { img in
+            let c = CAEmitterCell()
+            c.contents = img
+            c.magnificationFilter = CALayerContentsFilter.nearest.rawValue
+            c.scale = 1.5; c.birthRate = 30; c.lifetime = 0.9; c.lifetimeRange = 0.3
+            c.velocity = 170; c.velocityRange = 60
+            c.emissionLongitude = .pi / 3; c.emissionRange = .pi / 4   // 앞쪽 위로
+            c.yAcceleration = -420; c.alphaSpeed = -1; c.spinRange = 4
+            return c
+        }
+        spray.birthRate = 0
+        root.insertSublayer(spray, below: truck)
+
+        let move = CABasicAnimation(keyPath: "position.x")
+        move.fromValue = startX; move.toValue = endX; move.duration = duration
+        move.isRemovedOnCompletion = false; move.fillMode = .forwards
+        truck.add(move, forKey: "drive")
+
+        let t0 = CACurrentMediaTime()
+        Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] timer in
+            guard let self = self else { timer.invalidate(); return }
+            let elapsed = CACurrentMediaTime() - t0
+            let front = startX + speed * CGFloat(elapsed) + size.width / 2 - px   // 앞날 끝
+            let upTo = min(self.heights.count, max(0, Int(front / pilePx)))
+            let ahead = upTo < self.heights.count ? self.heights[upTo] : 0
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            spray.emitterPosition = CGPoint(x: front, y: max(CGFloat(ahead) * pilePx, px * 4))
+            spray.birthRate = ahead > 0 ? 1 : 0
+            CATransaction.commit()
+            if self.heights[0..<upTo].contains(where: { $0 > 0 }) {
+                self.canvas.clear(CGRect(x: 0, y: 0, width: upTo, height: self.canvas.height))
+                for i in 0..<upTo { self.heights[i] = 0 }
+                self.redraw()
+            }
+            if elapsed >= duration {
+                timer.invalidate()
+                truck.removeFromSuperlayer()
+                spray.birthRate = 0
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { spray.removeFromSuperlayer() }
+                self.plow = nil
+            }
+        }
+    }
+}
+
+// 테두리 없는 흰 둥근 말풍선을 sprite 위(자리 없으면 아래)에 붙이고 stay 초 뒤 사라지게 한다
+@discardableResult
+func makeBubble(_ message: String, on sprite: CALayer, root: CALayer, scale: CGFloat, stay: Double = 2.5) -> CALayer {
+
+    let white = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+    let base = NSFont.systemFont(ofSize: 15, weight: .heavy)
+    let font = base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: 15) } ?? base
+    let text = NSAttributedString(string: message, attributes: [
+        .font: font,
+        .foregroundColor: NSColor(red: 0.75, green: 0.12, blue: 0.2, alpha: 1)])
+    let ts = text.size()
+    let padX: CGFloat = 12, padY: CGFloat = 6
+
+    // 테두리 없는 흰 둥근 말풍선 + 옅은 그림자 (밝은 창 위에서도 떠 보이게)
+    let box = CALayer()
+    box.anchorPoint = CGPoint(x: 0, y: 0)
+    box.bounds = CGRect(x: 0, y: 0, width: ceil(ts.width) + padX * 2, height: ceil(ts.height) + padY * 2)
+    box.backgroundColor = white
+    box.cornerRadius = box.bounds.height / 2
+    box.shadowColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+    box.shadowOpacity = 0.25
+    box.shadowRadius = 4
+    box.shadowOffset = CGSize(width: 0, height: -1)
+    let label = CATextLayer()
+    label.string = text
+    label.frame = CGRect(x: padX, y: padY - 1, width: ceil(ts.width) + 2, height: ceil(ts.height))
+    label.contentsScale = scale
+    box.addSublayer(label)
+
+    // 위에 자리가 없으면(눈 높이 1/5 등) 산타 아래에 띄운다
+    let s = sprite.bounds.size
+    let sf = sprite.presentation()?.frame ?? sprite.frame
+    let above = sf.maxY + 14 + box.bounds.height <= root.bounds.height
+    // 화면 왼쪽·오른쪽 끝에서도 말풍선이 잘리지 않게 안쪽으로 민다
+    let bx = min(max(6, 8 - sf.minX), root.bounds.width - 8 - box.bounds.width - sf.minX)
+    box.position = CGPoint(x: bx, y: above ? s.height + 14 : -14 - box.bounds.height)
+    // 말꼬리 = 산타 쪽 모서리에 붙은 흰 마름모
+    let tail = CALayer()
+    tail.backgroundColor = white
+    tail.bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+    tail.position = CGPoint(x: 20, y: above ? 1 : box.bounds.height - 1)
+    tail.setAffineTransform(CGAffineTransform(rotationAngle: .pi / 4))
+    box.insertSublayer(tail, below: label)
+    sprite.addSublayer(box)
+
+    let pop = CAKeyframeAnimation(keyPath: "transform.scale")
+    pop.values = [0.3, 1.15, 1]
+    pop.keyTimes = [0, 0.6, 1]
+    pop.duration = 0.25
+    box.add(pop, forKey: "pop")
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + stay) { [weak box] in
+        guard let box = box else { return }
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { box.removeFromSuperlayer() }
+        box.opacity = 0
+        CATransaction.commit()
+    }
+    return box
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var windows: [SnowWindow] = []
+    var piles: [PileWindow] = []
+    var amountFactor: CGFloat { [0.5, 1, 2][amount.rawValue] }
     var status: NSStatusItem!
     var amount = Amount(rawValue: UserDefaults.standard.integer(forKey: "amount")) ?? .light
     var santaOn = UserDefaults.standard.object(forKey: "santa") as? Bool ?? true
@@ -753,6 +1085,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--demo3") {  // 별똥별 잡기
             windows.forEach { $0.shootStar() }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.windows.forEach { w in w.actors.forEach { w.catchStar($0) } } }
+        }
+        if CommandLine.arguments.contains("--demo4") {  // 눈 더미 채워 두고 제설차
+            piles.forEach { p in p.carry = 9000; p.grow(0) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.piles.forEach { $0.hideDeer() }; self.callPlow() }
         }
         if CommandLine.arguments.contains("--demo") {
             callSanta()
@@ -888,6 +1224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(sub("↕︎ Snow height", bandChoices.enumerated().map { item($1.title, #selector(pickBand(_:)), tag: $0, on: $0 == bandIndex) }))
         m.addItem(sub("⏬ Fall speed", fallSpeeds.enumerated().map { item($1.title, #selector(pickFallSpeed(_:)), tag: $0, on: $0 == fallSpeedIndex) }))
         m.addItem(sub("🍬 Falling treats", treatGroups.enumerated().map { item($1.title, #selector(toggleTreat(_:)), tag: $0, on: !treatsOff.contains($0)) }))
+        m.addItem(item("🏔 Snow piles up", #selector(togglePile), on: pileOn))
         m.addItem(.separator())
         m.addItem(sub("🛷 Visitors", [item("Santa 🎅", #selector(toggleSanta), on: santaOn),
                                           item("Snowman ⛄", #selector(toggleSnowman), on: snowmanOn),
@@ -897,7 +1234,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(sub("📣 Call now", [item("Santa 🎅", #selector(callSanta)),
                                        item("Snowman ⛄", #selector(callSnowman)),
                                        item("Penguin 🐧", #selector(callPenguin)),
-                                       item("Shooting star 🌠", #selector(callStar))]))
+                                       item("Shooting star 🌠", #selector(callStar)),
+                                       item("Snowplow 🚜", #selector(callPlow))]))
         m.addItem(.separator())
         let quit = NSMenuItem(title: "Stop snow (Quit)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         m.addItem(quit)
@@ -908,6 +1246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         amount = Amount(rawValue: sender.tag) ?? .light
         UserDefaults.standard.set(amount.rawValue, forKey: "amount")
         windows.forEach { $0.apply(amount, width: $0.frame.width) }
+        piles.forEach { $0.amountFactor = amountFactor }
         buildMenu()
     }
 
@@ -928,7 +1267,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windows.forEach { $0.stop(); $0.orderOut(nil) }
         windows = NSScreen.screens.map { SnowWindow(screen: $0, amount: amount) }
         windows.forEach { $0.orderFrontRegardless() }
+        piles.forEach { $0.stop(); $0.orderOut(nil) }
+        piles = pileOn && !stageMode ? NSScreen.screens.map { PileWindow(screen: $0, amountFactor: amountFactor) } : []
+        piles.forEach { $0.show() }
     }
+
+    @objc func togglePile() {
+        pileOn.toggle()
+        UserDefaults.standard.set(pileOn, forKey: "pile")
+        rebuild()
+        buildMenu()
+    }
+
+    @objc func callPlow() { piles.forEach { $0.sendPlow() } }
 }
 
 let app = NSApplication.shared

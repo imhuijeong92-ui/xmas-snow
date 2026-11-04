@@ -8,6 +8,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
@@ -148,7 +149,7 @@ class Spark
 class SnowForm : Form
 {
     public static readonly string[] BandName = { "1/5", "1/3", "1/2", "Full screen" };
-    static readonly float[] BandRatio = { 0.2f, 0.33f, 0.5f, 1f };  // 화면 위에서부터 이 비율까지만 내린다
+    public static readonly float[] BandRatio = { 0.2f, 0.33f, 0.5f, 1f };  // 화면 위에서부터 이 비율까지만 내린다
     static readonly float[] Rate = { 0.004f, 0.012f, 0.03f };    // 화면 폭 1pt 당 초당 눈송이 수
     static readonly float[] Weight = { 0.5f, 0.35f, 0.15f };     // 점·중간·큰 눈꽃 비율
     static readonly float[] Speed = { 30f, 40f, 50f };           // pt/초
@@ -598,7 +599,7 @@ class SnowForm : Form
         }
     }
 
-    static readonly string[] Tree = { "...Y...", "..GGG..", ".GGGGG.", "..GGG..", ".GGGGG.", "GGGGGGG", "...b..." };
+    public static readonly string[] Tree = { "...Y...", "..GGG..", ".GGGGG.", "..GGG..", ".GGGGG.", "GGGGGGG", "...b..." };
 
     // 흰 둥근 말풍선 — 산타·눈사람·펭귄을 따라다닌다. 위에 자리가 없으면 아래에 띄운다.
     // 투명 처리 바탕색(자홍)과 섞이지 않게 도형은 안티앨리어싱 없이 그린다.
@@ -608,6 +609,12 @@ class SnowForm : Form
     }
 
     void DrawBubble(Graphics g, PointF p, int spriteH, string text, string[] Tree, string fontName)
+    {
+        DrawBubbleAt(g, p, spriteH, text, Tree, fontName, scale, Width);
+    }
+
+    // 쌓인 눈 창의 루돌프 말풍선도 같은 모양으로 쓰도록 static
+    public static void DrawBubbleAt(Graphics g, PointF p, int spriteH, string text, string[] Tree, string fontName, float scale, int Width)
     {
         int tc = Math.Max(1, (int)Math.Round(2 * scale));  // 트리 픽셀 한 칸
         int treeW = Tree[0].Length * tc, treeH = Tree.Length * tc;
@@ -664,12 +671,320 @@ class SnowForm : Form
     }
 }
 
+// 작업 영역 맨 아래에 눈송이가 하나씩 내려앉아 쌓이고, 가득 차면 루돌프가 오른쪽에서 빼꼼 내다본다.
+// 쌓인 눈이나 루돌프를 클릭하면 제설차가 왼쪽→오른쪽으로 밀고 간다.
+// 모니터마다 아래쪽 띠 창 하나(클릭 통과 · 최상단). 눈은 영구 비트맵에 눈송이를 찍어 쌓고, 열별 높이 지도를 따로 둔다.
+class PileForm : Form
+{
+    const int TopBand = 8;  // 윗면 8px 는 듬성듬성 한 겹만 얹는다
+    const int Cap = 22;  // 최대 높이 = 캔버스 22px (2px 기준 44px)
+    static readonly float[] AmountFactor = { 0.5f, 1f, 2f };
+    static readonly Color PileEdge = Color.FromArgb(143, 163, 184);
+    static readonly SolidBrush KeyBrush = new SolidBrush(Art.Key);
+    static readonly string[] PlowA = {
+        "....W...................",
+        "....RR..................",
+        "....RRR.................",
+        "...WWWWW................",
+        "...FFKFF................",
+        "...WWWWW...............W",
+        "..RRWWWRRG............RW",
+        "..GGGGGGGG...........RW.",
+        "RYRGRYRGRYRGRYRGRR..RW..",
+        "RRRRRRRRRRRRRRRYRR.RW...",
+        "RRRRRRRRRRRRRRYGYRWR....",
+        "RRRRRRRRRRRRRRRYRR.RW...",
+        "GGGGGGGGGGGGGGGGGG..RW..",
+        "..KKK........KKK.....RW.",
+        ".KKYKK......KKYKK.....RW",
+        "..KKK........KKK.......W" };
+    const string PlowRowB = "RGRYRGRYRGRYRGRYRR..RW..";  // 반짝이 전구 줄 반대 순서
+    static readonly string[] RudolphRows = {
+        "b..b......b..b",
+        "bbbb......bbbb",
+        ".bb........bb.",
+        "..BBBBBBBBBB..",
+        "TBBBBBBBBBBBBT",
+        ".BBKWBBBBKWBB.",
+        ".BBKKBBBBKKBB.",
+        ".BBBBBBBBBBBB.",
+        "..BBTTNNTTBB..",
+        "..BTTNNNNTTB..",
+        "..BTTNNNNTTB..",
+        "...TTTNNTTT...",
+        "....TTTTTT...." };
+
+    readonly Random rnd;
+    readonly float scale;
+    readonly int u, cols, bmpH;       // u = 캔버스 1px 의 실제 픽셀(2px×배율)
+    readonly int[] h;                 // 열별 높이(캔버스 px)
+    readonly int[] cap;               // 열별 상한 — 가득 차도 윗면이 평평하지 않게 물결 모양
+    readonly Bitmap pileBmp;          // 쌓인 눈 (바탕 = 투명색)
+    readonly Graphics pg;
+    readonly ImageAttributes keyAttr = new ImageAttributes();
+    readonly Bitmap[] pat = new Bitmap[3];  // 내려앉는 눈송이 (점·중간·큰)
+    readonly Bitmap[] plowBmp = new Bitmap[2];  // 0 = 전구 줄 A, 1 = B
+    readonly Bitmap rudBmp;
+    readonly List<Spark> sparks = new List<Spark>();
+    float debt, clock, plowX, rudT, lastPeek;
+    bool dirty = true, wasDown, plowing, rud, peeked;
+    int cleared;                      // 제설날 뒤로 이미 비운 열 수
+
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
+
+    public int Amount;
+    readonly int band;
+
+    public PileForm(Screen screen, int amount, int band, Random rnd)
+    {
+        this.rnd = rnd;
+        Amount = amount;
+        this.band = band;
+        using (Graphics g = CreateGraphics()) scale = g.DpiX / 96f;
+        u = Math.Max(1, (int)Math.Round(2 * scale));
+        Rectangle wa = screen.WorkingArea;
+        cols = (wa.Width + u - 1) / u;
+        h = new int[cols];
+        bmpH = (Cap + 20) * u;
+        cap = new int[cols];
+        double p0 = rnd.NextDouble() * 2 * Math.PI, p1 = rnd.NextDouble() * 2 * Math.PI, p2 = rnd.NextDouble() * 2 * Math.PI;
+        for (int i = 0; i < cols; i++)
+            cap[i] = Cap + (int)Math.Round(6 * Math.Sin(i * 0.016 + p0) + 3 * Math.Sin(i * 0.047 + p1) + 1.5 * Math.Sin(i * 0.12 + p2));
+        pileBmp = new Bitmap(cols * u, bmpH);
+        pg = Graphics.FromImage(pileBmp);
+        pg.Clear(Art.Key);
+        pg.InterpolationMode = InterpolationMode.NearestNeighbor;
+        pg.PixelOffsetMode = PixelOffsetMode.Half;
+        pg.SmoothingMode = SmoothingMode.None;
+        keyAttr.SetColorKey(Art.Key, Art.Key);
+
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        TopMost = true;
+        StartPosition = FormStartPosition.Manual;
+        int ph = (int)(160 * scale);  // 눈 + 루돌프 + 말풍선이 들어갈 높이
+        Bounds = new Rectangle(wa.X, wa.Bottom - ph, wa.Width, ph);
+        BackColor = Art.Key;
+        TransparencyKey = Art.Key;
+        DoubleBuffered = true;
+
+        pat[0] = Art.Sprite(Art.FlakeDot, u, Art.FlakeEdge);
+        pat[1] = Art.Sprite(Art.FlakeMid, u, Art.FlakeEdge);
+        pat[2] = Art.Sprite(Art.FlakeBig, u, Art.FlakeEdge);
+        int pc = Math.Max(1, (int)Math.Round(3 * scale));
+        string[] b = (string[])PlowA.Clone();
+        b[8] = PlowRowB;
+        plowBmp[0] = Art.Sprite(PlowA, pc, Art.SpriteEdge);
+        plowBmp[1] = Art.Sprite(b, pc, Art.SpriteEdge);
+        rudBmp = Art.Sprite(RudolphRows, Math.Max(1, (int)Math.Round(4 * scale)), Art.SpriteEdge);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) { pg.Dispose(); pileBmp.Dispose(); }
+        base.Dispose(disposing);
+    }
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            CreateParams cp = base.CreateParams;
+            cp.ExStyle |= 0x80000 | 0x20 | 0x80 | 0x08000000;  // LAYERED | TRANSPARENT | TOOLWINDOW | NOACTIVATE
+            return cp;
+        }
+    }
+
+    protected override bool ShowWithoutActivation { get { return true; } }
+
+    // 제설차 출발 (이미 달리는 중이면 무시). 루돌프는 들어간다.
+    public void StartPlow()
+    {
+        if (plowing) return;
+        rud = false;
+        plowing = true;
+        plowX = -plowBmp[0].Width;
+        cleared = 0;
+    }
+
+    // 눈송이 하나가 내려앉는다: 아래에서부터 쌓이도록 좌우 위치를 고르고 높이를 정해 영구 비트맵에 찍는다
+    void Land()
+    {
+        double r = rnd.NextDouble();
+        Bitmap bm = pat[r < 0.30 ? 0 : (r < 0.75 ? 1 : 2)];
+        int size = bm.Width / u;
+        for (int tries = 0; tries < 12; tries++)
+        {
+            int x = rnd.Next(cols + size) - size + size / 2;  // 가장자리에 걸쳐도 된다
+            int lo = Math.Max(0, x + 1), hi = Math.Min(cols - 1, x + size - 2);  // 테두리 칸을 뺀 안쪽 열
+            if (lo > hi) continue;
+            int mx = 0, mc = int.MaxValue;
+            for (int i = lo; i <= hi; i++) { if (h[i] > mx) mx = h[i]; if (cap[i] < mc) mc = cap[i]; }
+            int y = mx - size / 3;  // 조금 파묻히게
+            int top = y + size - 2;
+            if (top > mc - TopBand)  // 윗띠에 닿는 눈송이: 둘레에 이미 윗띠까지 찬 열이 있으면 건너뛰고, 파묻지 않고 얹는다
+            {
+                bool crowded = false;
+                for (int i = Math.Max(0, x - 1); i < Math.Min(cols, x + size + 1); i++)
+                    if (h[i] > mc - TopBand) { crowded = true; break; }
+                if (crowded) continue;
+                y = mx;
+                top = y + size - 2;
+            }
+            if (top > mc) continue;
+            pg.DrawImage(bm, new Rectangle(x * u, bmpH - (y + size) * u, bm.Width, bm.Height), 0, 0, bm.Width, bm.Height, GraphicsUnit.Pixel, keyAttr);
+            for (int i = lo; i <= hi; i++) if (h[i] < top) h[i] = top;
+            return;
+        }
+    }
+
+    bool IsFull()
+    {
+        int n = 0;
+        for (int i = 0; i < cols; i++) if (h[i] >= cap[i] - TopBand - 2) n++;
+        return n >= cols * 0.85f;
+    }
+
+    public void Step(float dt)
+    {
+        clock += dt;
+
+        // 눈이 덜 내리면(낮은 띠·적은 양) 그만큼 느리게 쌓인다. 가득 차면 더는 안 자란다.
+        float ratio = SnowForm.BandRatio[band];
+        float fillSeconds = 360f / (AmountFactor[Amount] * ratio);
+        debt += dt * cols * Cap / (fillSeconds * 18f);
+        if (debt > 50f) debt = 50f;
+        bool landed = false;
+        while (debt >= 1f) { debt -= 1f; Land(); landed = true; }
+        if (landed) dirty = true;
+
+        // 가득 찼고 제설차·루돌프가 없고 마지막 방문이 10분 넘었으면 루돌프가 빼꼼
+        if (!plowing && !rud && landed && (!peeked || clock - lastPeek > 600f) && IsFull())
+        {
+            rud = true; rudT = 0; peeked = true; lastPeek = clock;
+        }
+        if (rud)
+        {
+            rudT += dt;
+            if (rudT >= 8.5f) rud = false;
+        }
+
+        // 창은 클릭을 통과시키므로, 왼쪽 버튼이 눌린 순간 커서가 쌓인 눈이나 루돌프 위였는지 직접 본다
+        bool down = (GetAsyncKeyState(0x01) & 0x8000) != 0;
+        if (down && !wasDown && !plowing)
+        {
+            Point c = Cursor.Position;
+            bool hit = false;
+            if (rud)
+            {
+                PointF rp = RudPos();
+                float m = 6 * scale;
+                if (new RectangleF(Left + rp.X - m, Top + rp.Y - m, rudBmp.Width + m * 2, rudBmp.Height + m * 2).Contains(c)) hit = true;
+            }
+            int ci = (c.X - Left) / u;
+            if (!hit && c.X >= Left && ci >= 0 && ci < cols && h[ci] >= 3)
+            {
+                float top = Top + Height - h[ci] * u - 6 * scale;  // 눈 높이 + 여유 6px
+                if (c.Y >= top && c.Y <= Top + Height) hit = true;
+            }
+            if (hit) StartPlow();
+        }
+        wasDown = down;
+
+        if (plowing)
+        {
+            plowX += 220f * scale * dt;
+            int front = (int)((plowX + plowBmp[0].Width - 3) / u);  // 날 앞 열
+            if (front > cols) front = cols;
+            if (front > cleared)
+            {
+                for (int i = cleared; i < front; i++)
+                {
+                    for (int k = 0; k < h[i]; k += 3)
+                        if (sparks.Count < 400 && rnd.NextDouble() < 0.5) AddSpray(i, k);
+                    h[i] = 0;
+                }
+                pg.FillRectangle(KeyBrush, cleared * u, 0, (front - cleared) * u, bmpH);
+                cleared = front;
+                dirty = true;
+            }
+            if (plowX >= Width) plowing = false;
+        }
+
+        for (int i = sparks.Count - 1; i >= 0; i--)
+        {
+            Spark s = sparks[i];
+            s.Life -= dt;
+            s.VY += 500 * scale * dt;
+            s.X += s.VX * dt;
+            s.Y += s.VY * dt;
+            if (s.Life <= 0 || s.Y > Height) sparks.RemoveAt(i);
+        }
+
+        if (dirty || plowing || rud || sparks.Count > 0) { dirty = false; Invalidate(); }
+    }
+
+    // 날 앞에서 위·앞쪽으로 튀는 작은 눈가루
+    void AddSpray(int col, int hgt)
+    {
+        Spark s = new Spark();
+        s.Col = rnd.Next(2) == 0 ? Color.White : PileEdge;
+        s.Size = Math.Max(1, (int)Math.Round((1 + rnd.Next(2)) * scale));
+        s.X = col * u;
+        s.Y = Height - hgt * u;
+        s.VX = (60 + (float)rnd.NextDouble() * 180) * scale;
+        s.VY = -(60 + (float)rnd.NextDouble() * 160) * scale;
+        s.Life = 0.5f + (float)rnd.NextDouble() * 0.5f;
+        sparks.Add(s);
+    }
+
+    // 루돌프: 오른쪽 가장자리에서 0.5초 동안 들어오고, 8초에 다시 나간다. 위아래로 3px 둥실.
+    PointF RudPos()
+    {
+        float s = 1f;
+        if (rudT < 0.5f) s = rudT / 0.5f;
+        else if (rudT > 8f) s = 1f - (rudT - 8f) / 0.5f;
+        s = Math.Max(0f, Math.Min(1f, s));
+        s = 1f - (1f - s) * (1f - s);
+        float cxEnd = Width - rudBmp.Width * 0.32f;
+        float cx = (Width + rudBmp.Width / 2f) + (cxEnd - (Width + rudBmp.Width / 2f)) * s;
+        float y = Height - Cap * 2 * 0.6f * scale - rudBmp.Height + (float)Math.Sin(rudT * 3) * 3 * scale;
+        return new PointF(cx - rudBmp.Width / 2f, y);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        Graphics g = e.Graphics;
+        g.InterpolationMode = InterpolationMode.NearestNeighbor;
+        g.PixelOffsetMode = PixelOffsetMode.Half;
+        g.SmoothingMode = SmoothingMode.None;
+        PointF rp = new PointF();
+        if (rud)
+        {
+            rp = RudPos();
+            g.DrawImageUnscaled(rudBmp, (int)rp.X, (int)rp.Y);  // 눈더미 뒤에서 내다본다
+        }
+        g.DrawImageUnscaled(pileBmp, 0, Height - bmpH);
+        foreach (Spark s in sparks)
+            using (SolidBrush pb = new SolidBrush(s.Col)) g.FillRectangle(pb, (int)s.X, (int)s.Y, s.Size, s.Size);
+        if (plowing)
+        {
+            Bitmap b = plowBmp[((clock % 0.6f) < 0.3f) ? 0 : 1];  // 전구 줄 0.3초마다 번갈아
+            int bounce = ((int)(clock / 0.12f) % 2) * (int)Math.Round(2 * scale);  // 덜컹덜컹
+            g.DrawImageUnscaled(b, (int)plowX, Height - b.Height - bounce);
+        }
+        if (rud && rudT >= 0.5f && rudT < 7.5f)
+            SnowForm.DrawBubbleAt(g, rp, rudBmp.Height, "Time to clear the snow? ❄️", SnowForm.Tree, "Segoe UI", scale, Width);
+    }
+}
+
 class Controller
 {
     static readonly string[] AmountName = { "Light", "Normal", "Heavy" };
     const string RegPath = @"Software\XmasSnow";
 
     readonly List<SnowForm> forms = new List<SnowForm>();
+    readonly List<PileForm> piles = new List<PileForm>();
     readonly Random rnd = new Random();
     readonly NotifyIcon tray = new NotifyIcon();
     readonly System.Windows.Forms.Timer tick = new System.Windows.Forms.Timer();
@@ -678,7 +993,7 @@ class Controller
     DateTime last = DateTime.Now;
     int amount;
     int band;
-    bool santaOn, snowmanOn, penguinOn, starOn;
+    bool santaOn, snowmanOn, penguinOn, starOn, pileOn;
     readonly System.Windows.Forms.Timer starTimer = new System.Windows.Forms.Timer();
 
     public Controller()
@@ -690,6 +1005,7 @@ class Controller
         snowmanOn = (int)k.GetValue("snowman", 1) == 1;
         penguinOn = (int)k.GetValue("penguin", 1) == 1;
         starOn = (int)k.GetValue("shootingStar", 1) == 1;
+        pileOn = (int)k.GetValue("pile", 1) == 1;
         SnowForm.SantaSpeed = Math.Min(2, Math.Max(0, (int)k.GetValue("santaSpeed", 1)));
         SnowForm.FallSpeed = Math.Min(2, Math.Max(0, (int)k.GetValue("fallSpeed", 1)));
         int off = (int)k.GetValue("treatsOff", 0);  // 끈 묶음 = 비트
@@ -712,6 +1028,7 @@ class Controller
             float dt = (float)Math.Min(0.1, (now - last).TotalSeconds);
             last = now;
             foreach (SnowForm f in forms) f.Step(dt);
+            foreach (PileForm p in piles) p.Step(dt);
         };
         tick.Start();
 
@@ -743,6 +1060,21 @@ class Controller
             SnowForm f = new SnowForm(s, amount, band, rnd);
             f.Show();
             forms.Add(f);
+        }
+        RebuildPiles();
+    }
+
+    // 쌓인 눈 창 = 모니터마다 하나(눈 쌓기를 끄면 치워서 숨긴다). 쌓인 높이는 초기화된다.
+    void RebuildPiles()
+    {
+        foreach (PileForm p in piles) p.Close();
+        piles.Clear();
+        if (!pileOn) return;
+        foreach (Screen s in Screen.AllScreens)
+        {
+            PileForm p = new PileForm(s, amount, band, rnd);
+            p.Show();
+            piles.Add(p);
         }
     }
 
@@ -784,6 +1116,7 @@ class Controller
         k.SetValue("snowman", snowmanOn ? 1 : 0, RegistryValueKind.DWord);
         k.SetValue("penguin", penguinOn ? 1 : 0, RegistryValueKind.DWord);
         k.SetValue("shootingStar", starOn ? 1 : 0, RegistryValueKind.DWord);
+        k.SetValue("pile", pileOn ? 1 : 0, RegistryValueKind.DWord);
         k.SetValue("santaSpeed", SnowForm.SantaSpeed, RegistryValueKind.DWord);
         k.SetValue("fallSpeed", SnowForm.FallSpeed, RegistryValueKind.DWord);
         int off = 0;
@@ -813,6 +1146,7 @@ class Controller
             {
                 amount = a;
                 foreach (SnowForm f in forms) f.Amount = a;
+                foreach (PileForm p in piles) p.Amount = a;
                 Save(); BuildMenu();
             }));
         }
@@ -841,6 +1175,7 @@ class Controller
             treats.DropDownItems.Add(Item(SnowForm.TreatGroupName[i], SnowForm.TreatOn[t], delegate { SnowForm.TreatOn[t] = !SnowForm.TreatOn[t]; Save(); BuildMenu(); }));
         }
         m.Items.Add(treats);
+        m.Items.Add(Item("🏔 Snow piles up", pileOn, delegate { pileOn = !pileOn; Save(); RebuildPiles(); BuildMenu(); }));
         m.Items.Add(new ToolStripSeparator());
 
         ToolStripMenuItem pals = new ToolStripMenuItem("Visitors");
@@ -863,6 +1198,7 @@ class Controller
         call.DropDownItems.Add(Item("Snowman", false, delegate { CallVisitor(0); }));
         call.DropDownItems.Add(Item("Penguin", false, delegate { CallVisitor(1); }));
         call.DropDownItems.Add(Item("Shooting star", false, delegate { CallVisitor(2); }));
+        call.DropDownItems.Add(Item("Snowplow 🚜", false, delegate { foreach (PileForm p in piles) p.StartPlow(); }));
         m.Items.Add(call);
 
         m.Items.Add(new ToolStripSeparator());

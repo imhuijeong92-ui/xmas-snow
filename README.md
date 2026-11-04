@@ -15,8 +15,10 @@ It sits on top of everything but never blocks your clicks, so you can keep worki
   - Santa, the snowman or the penguin → a *"Merry Christmas!"* bubble and a shower of gifts
   - A shooting star → *"Your wish will come true!"* ✨
   - A falling treat → it pops into pixel confetti
+  - The snow pile (or Rudolph) → Santa drives by in a snowplow 🚜 and clears it
+- **Snow piles up** flake by flake along the bottom of your screen — behind the Dock on macOS, just above the taskbar on Windows. Less snow or a lower snow height means it piles up more slowly. Once it reaches its full height it stays there, and Rudolph peeks in from the right edge to ask *"Time to clear the snow?"*
 - Works across **multiple monitors** — Santa flies from one screen to the next
-- Light on resources: about 0.5% of total CPU on an M1 Mac (4–5% of one core) and about 20 MB of memory
+- Light on resources: under 1% of total CPU on an M1 Mac (about 6–7% of one core) and about 27 MB of memory
 
 ## Menu
 
@@ -28,9 +30,10 @@ Click ❄︎ in the menu bar (macOS) or right-click the ❄ tray icon (Windows):
 | Snow height | 1/5 / 1/3 / 1/2 / Full screen (measured from the top) |
 | Fall speed | Slow / Normal / Fast |
 | Falling treats | Turn each treat on or off |
+| Snow piles up | Turn the snow pile on or off |
 | Visitors | Turn Santa / Snowman / Penguin / Shooting star on or off |
 | Santa speed | Slow / Normal / Fast |
-| Call now | Summon any visitor right away |
+| Call now | Summon any visitor or the snowplow right away |
 | Stop snow (Quit) | |
 
 Your choices are remembered.
