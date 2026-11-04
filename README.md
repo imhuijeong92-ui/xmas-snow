@@ -54,7 +54,8 @@ Grab the zips from the [latest release](../../releases/latest).
 
 1. Right-click `XmasSnow-windows.zip` → **Extract All** (don't run it from inside the zip).
 2. Double-click `XmasSnow.bat`. If SmartScreen appears, click **More info → Run anyway**.
-3. A ❄ icon appears in the system tray (click ^ if it's hidden). The first launch takes a few seconds while it compiles.
+3. A console window flashes and closes — that's normal. A few seconds later the snow starts and a "Xmas Snow is running" notification pops up. A ❄ icon appears in the system tray (click ^ if it's hidden).
+4. If nothing happens, run `XmasSnow-debug.bat` instead — it keeps a console open so you can see the error (it's also saved to `error.txt`).
 
 The Windows version is a single PowerShell script (`snow.ps1`) that compiles a small C# WinForms program at launch — you can read every line before running it.
 

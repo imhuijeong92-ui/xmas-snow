@@ -1062,6 +1062,8 @@ class Controller
         tray.Icon = Icon.FromHandle(ib.GetHicon());
         tray.Text = "Christmas Snow";
         tray.Visible = true;
+        // 실행할 때 검은 창이 잠깐 떴다 닫히고 몇 초 뒤에 눈이 와서, 안 켜진 줄 알기 쉽다 → 켜졌다고 알림을 띄운다
+        tray.ShowBalloonTip(5000, "Xmas Snow is running ❄", "Snow is falling! Right-click the ❄ icon in the taskbar tray for options.", ToolTipIcon.Info);
         BuildMenu();
 
         Rebuild();
