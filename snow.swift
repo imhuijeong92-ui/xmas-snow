@@ -703,7 +703,7 @@ let peekDeer = spriteImage([
     "....BBBBBBBB....",
     "BB.BBBBBBBBBB.BB",
     ".BBBBKBBBBKBBBB.",
-    "...BBBBBBBBBB...",
+    "...BBKBBBBKBB...",  // 눈을 한 칸 아래로 길게
     "...BBTTTTTTBB...",
     "...BTTTNNTTTB...",
     "...BTTTNNTTTB...",
