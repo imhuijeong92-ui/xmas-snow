@@ -35,9 +35,13 @@ Click ❄︎ in the menu bar (macOS) or right-click the ❄ tray icon (Windows):
 | Visitors | Turn Santa / Snowman / Penguin / Shooting star on or off |
 | Santa speed | Slow / Normal / Fast |
 | Call now | Summon any visitor or the snowplow right away |
+| Check for updates… | See if a newer version is out |
+| Update to vX.Y.Z | Appears at the top when a new version is out — click to install it and restart |
 | Stop snow (Quit) | |
 
 Your choices are remembered.
+
+**Updates**: about once every 12 hours the app asks GitHub for the latest release version (nothing else is sent). If there's a newer one, an *Update* item appears at the top of the menu. Clicking it downloads the release zip from this repository, swaps it in and restarts the snow.
 
 ## Install
 

@@ -1129,6 +1129,31 @@ final class PileWindow: NSPanel {
     }
 }
 
+// ── 메뉴에서 바로 업데이트 ──────────────
+// 깃허브 최신 릴리스(태그 vX.Y.Z)가 이 버전보다 높으면 ❄︎ 메뉴 맨 위에 'Update to …' 가 뜬다.
+// ⚠ 릴리스를 낼 때마다 이 값과 태그를 같이 올릴 것 (같은 태그에 파일만 바꾸면 업데이트로 안 잡힌다)
+let appVersion = "1.2.0"
+// 확인용: XMASSNOW_FEED 로 가짜 릴리스 정보를 줄 수 있다 (그때는 그 주소에서 받는 것도 허용)
+let testFeed = ProcessInfo.processInfo.environment["XMASSNOW_FEED"]
+let releaseFeed = URL(string: testFeed ?? "https://api.github.com/repos/imhuijeong92-ui/xmas-snow/releases/latest")!
+let releasePage = URL(string: "https://github.com/imhuijeong92-ui/xmas-snow/releases/latest")!
+// 이 저장소 릴리스 파일만 받는다 (호스트·경로를 따로 확인 — 접두어만 보면 다른 주소가 끼어들 수 있다)
+func isOurDownload(_ u: URL) -> Bool {
+    guard !u.path.contains("..") else { return false }
+    if testFeed != nil { return u.scheme == "http" && u.host == "127.0.0.1" }
+    return u.scheme == "https" && u.host == "github.com" && u.path.hasPrefix("/imhuijeong92-ui/xmas-snow/releases/download/")
+}
+
+// "1.10.0" > "1.9.2" 처럼 숫자 단위로 비교
+func isNewer(_ a: String, than b: String) -> Bool {
+    let x = a.split(separator: ".").map { Int($0) ?? 0 }, y = b.split(separator: ".").map { Int($0) ?? 0 }
+    for i in 0..<max(x.count, y.count) {
+        let p = i < x.count ? x[i] : 0, q = i < y.count ? y[i] : 0
+        if p != q { return p > q }
+    }
+    return false
+}
+
 // ── 이스터에그 ──────────────
 // 빼꼼 나온 루돌프를 5번 연달아 누르면 한 줄씩 들려주는 비밀 이야기 (누를 때마다 다음 이야기)
 let deerStories: [[String]] = [
@@ -1231,6 +1256,18 @@ func makeBubble(_ message: String, on sprite: CALayer, root: CALayer, scale: CGF
     return box
 }
 
+@discardableResult
+func run(_ tool: String, _ args: [String]) -> Bool {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: tool)
+    p.arguments = args
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
+    guard (try? p.run()) != nil else { return false }
+    p.waitUntilExit()
+    return p.terminationStatus == 0
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var windows: [SnowWindow] = []
     var piles: [PileWindow] = []
@@ -1259,6 +1296,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         scheduleSanta(first: true)
         scheduleVisitor(first: true)
         scheduleStar(first: true)
+        // 새 버전 확인 = 켜고 1분 뒤, 그 뒤로 12시간마다 (깃허브에 버전만 묻는다)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { self.checkForUpdate() }
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 12 * 3600, repeats: true) { [weak self] _ in self?.checkForUpdate() }
         // 확인용: --demo 로 켜면 바로 산타가 날고 3초 뒤 말풍선·선물을 띄운다
         if CommandLine.arguments.contains("--demo2") {  // 눈사람·펭귄 + 간식 잔뜩
             windows.forEach { w in w.walk("snowman"); w.walk("penguin"); w.treatDebt = 6 }
@@ -1272,6 +1312,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if CommandLine.arguments.contains("--demo4") {  // 눈 더미 채워 두고 제설차
             piles.forEach { p in p.carry = 9000; p.grow(0) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.piles.forEach { $0.puff(at: CGPoint(x: 300, y: 30)); $0.hideDeer() }; self.callPlow() }
+        }
+        if CommandLine.arguments.contains("--demo6") {  // 업데이트: XMASSNOW_FEED 의 가짜 릴리스로 바로 설치까지
+            checkForUpdate()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.installUpdate() }
         }
         if CommandLine.arguments.contains("--demo5") {  // 이스터에그: 루돌프 이야기 → 산타 디데이 → 숨은 동화
             piles.forEach { p in p.carry = 9000; p.grow(0) }
@@ -1412,6 +1456,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return it
         }
         let m = NSMenu()
+        if let u = update {
+            let up = item(updating ? "Updating to v\(u.version)…" : "⬆️ Update to v\(u.version)", updating ? nil : #selector(installUpdate))
+            up.isEnabled = !updating
+            m.addItem(up)
+            m.addItem(.separator())
+        }
         m.addItem(sub("❄︎ Snow amount", Amount.allCases.map { item($0.title, #selector(pick(_:)), tag: $0.rawValue, on: $0 == amount) }))
         m.addItem(sub("↕︎ Snow height", bandChoices.enumerated().map { item($1.title, #selector(pickBand(_:)), tag: $0, on: $0 == bandIndex) }))
         m.addItem(sub("⏬ Fall speed", fallSpeeds.enumerated().map { item($1.title, #selector(pickFallSpeed(_:)), tag: $0, on: $0 == fallSpeedIndex) }))
@@ -1437,6 +1487,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         storyItem = item("📖 A little story", #selector(showStory))
         storyItem?.isHidden = true
         m.addItem(storyItem!)
+        m.addItem(item("Check for updates… (v\(appVersion))", #selector(checkNow)))
         let quit = NSMenuItem(title: "Stop snow (Quit)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         m.addItem(quit)
         m.delegate = self
@@ -1444,6 +1495,108 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     var storyItem: NSMenuItem?
+
+    // ── 업데이트 ──
+    var update: (version: String, url: URL)?
+    var updating = false
+    var updateTimer: Timer?
+
+    @objc func checkNow() { checkForUpdate(manual: true) }
+
+    func checkForUpdate(manual: Bool = false) {
+        var req = URLRequest(url: releaseFeed, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            var found: (version: String, url: URL)?
+            var ok = false
+            if (resp as? HTTPURLResponse)?.statusCode == 200, let data = data,
+               let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let tag = j["tag_name"] as? String, let assets = j["assets"] as? [[String: Any]] {
+                ok = true
+                let v = tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+                if isNewer(v, than: appVersion),
+                   let s = assets.first(where: { ($0["name"] as? String) == "XmasSnow-mac.zip" })?["browser_download_url"] as? String,
+                   let u = URL(string: s), isOurDownload(u) { found = (v, u) }
+            }
+            DispatchQueue.main.async {
+                // 확인에 실패했을 때(오프라인·요청 제한)는 이미 떠 있던 업데이트 항목을 지우지 않는다
+                if ok && !self.updating { self.update = found; self.buildMenu() }
+                guard manual else { return }
+                if let f = found { self.askInstall(f.version) }
+                else { self.say(ok ? "You're up to date ✨" : "Couldn't check for updates", ok ? "Xmas Snow v\(appVersion) is the latest version." : "Please check your internet connection and try again.") }
+            }
+        }.resume()
+    }
+
+    func say(_ title: String, _ text: String) {
+        let a = NSAlert()
+        a.messageText = title
+        a.informativeText = text
+        NSApp.activate(ignoringOtherApps: true)
+        a.runModal()
+    }
+
+    func askInstall(_ v: String) {
+        let a = NSAlert()
+        a.messageText = "Xmas Snow v\(v) is available"
+        a.informativeText = "You have v\(appVersion). Update now? The snow will restart in a few seconds."
+        a.addButton(withTitle: "Update")
+        a.addButton(withTitle: "Later")
+        NSApp.activate(ignoringOtherApps: true)
+        if a.runModal() == .alertFirstButtonReturn { installUpdate() }
+    }
+
+    // 새 zip 받기 → 풀기 → 지금 앱 자리에 바꿔 넣기 → 다시 켜기. 안 되면 릴리스 페이지를 연다
+    @objc func installUpdate() {
+        guard let u = update, !updating else { return }
+        updating = true
+        buildMenu()
+        URLSession.shared.downloadTask(with: u.url) { tmp, resp, _ in
+            let fm = FileManager.default
+            var installed: URL?
+            let old = Bundle.main.bundleURL
+            // 바꿔 넣을 새 앱은 지금 앱과 같은 볼륨의 임시 폴더에 푼다 (replaceItemAt 요구 사항)
+            if let tmp = tmp, (resp as? HTTPURLResponse)?.statusCode == 200,
+               let work = try? fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: old, create: true) {
+                let zip = work.appendingPathComponent("XmasSnow-mac.zip"), out = work.appendingPathComponent("out")
+                let newApp = out.appendingPathComponent("XmasSnow.app")
+                if (try? fm.createDirectory(at: out, withIntermediateDirectories: true)) != nil,
+                   (try? fm.moveItem(at: tmp, to: zip)) != nil,
+                   run("/usr/bin/ditto", ["-x", "-k", zip.path, out.path]),
+                   fm.isExecutableFile(atPath: newApp.appendingPathComponent("Contents/MacOS/snowfall").path),
+                   // 서명 검사는 진짜임 보증이 아니라(ad-hoc) 풀린 앱이 멀쩡하고 같은 앱인지 확인용. 보안은 HTTPS + 저장소 주소 확인
+                   run("/usr/bin/codesign", ["--verify", "-R=identifier \"io.github.imhuijeong92-ui.xmas-snow\"", newApp.path]),
+                   !old.path.contains("/AppTranslocation/"),   // 격리된 채로 실행 중이면 바꿔 넣을 수 없다
+                   fm.isWritableFile(atPath: old.deletingLastPathComponent().path) {
+                    do { installed = try fm.replaceItemAt(old, withItemAt: newApp) }
+                    catch {
+                        // 바꿔 넣다 실패하면서 원래 앱을 다른 곳에 옮겨 둔 경우 제자리로 되돌린다
+                        if !fm.fileExists(atPath: old.path),
+                           let moved = (error as NSError).userInfo["NSFileOriginalItemLocationKey"] as? URL {
+                            try? fm.moveItem(at: moved, to: old)
+                        }
+                    }
+                }
+                try? fm.removeItem(at: work)
+            }
+            DispatchQueue.main.async {
+                if let app = installed {
+                    self.piles.forEach { $0.save() }
+                    let p = Process()
+                    p.executableURL = URL(fileURLWithPath: "/bin/sh")
+                    // 지금 앱이 완전히 꺼진 뒤에 연다 (아직 살아 있으면 open 이 새로 켜지 않고 이걸 앞으로 가져오기만 한다)
+                    p.arguments = ["-c", "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"$0\"", app.path, String(getpid())]
+                    try? p.run()
+                    NSApp.terminate(nil)
+                } else {
+                    self.updating = false
+                    self.buildMenu()
+                    self.say("Couldn't update automatically", "The download page will open. Please replace XmasSnow.app with the new one.")
+                    NSWorkspace.shared.open(releasePage)
+                }
+            }
+        }.resume()
+    }
 
     func menuWillOpen(_ menu: NSMenu) {
         storyItem?.isHidden = !NSEvent.modifierFlags.contains(.option)

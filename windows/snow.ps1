@@ -11,9 +11,13 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Diagnostics;
 using System.Globalization;
+using System.IO;
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -22,15 +26,23 @@ public static class XmasSnow
 {
     [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
 
-    public static void Run()
+    public static void Run(string folder, bool updated)
     {
+        Updater.Folder = folder;
         bool fresh;
         Mutex m = new Mutex(true, "XmasSnow.SingleInstance", out fresh);
+        // 업데이트로 다시 켜진 거면 이전 인스턴스가 끝날 때까지 30초 기다린다
+        if (!fresh && updated)
+        {
+            try { fresh = m.WaitOne(30000); }
+            catch (AbandonedMutexException) { fresh = true; }  // 이전 인스턴스가 놓지 않고 끝났어도 넘겨받는다
+        }
         if (!fresh) return;  // 이미 켜져 있으면 하나 더 띄우지 않는다
         SetProcessDPIAware();
         Application.EnableVisualStyles();
         Controller c = new Controller();
         Application.Run();
+        m.ReleaseMutex();  // debug 실행기(-NoExit)처럼 PowerShell 이 남아 있어도 다음 실행을 막지 않게
         GC.KeepAlive(c);
         GC.KeepAlive(m);
     }
@@ -116,6 +128,132 @@ static class Art
     {
         return y >= 0 && y < rows.Length && x >= 0 && x < rows[y].Length && rows[y][x] != '.';
     }
+}
+
+// ── 메뉴에서 바로 업데이트 ──────────────
+// 깃허브 최신 릴리스(태그 vX.Y.Z)가 이 버전보다 높으면 ❄ 메뉴 맨 위에 'Update to …' 가 뜬다.
+// ⚠ 릴리스를 낼 때마다 이 값과 태그를 같이 올릴 것 (같은 태그에 파일만 바꾸면 업데이트로 안 잡힌다)
+static class Updater
+{
+    public const string Version = "1.2.0";
+    const string Feed = "https://api.github.com/repos/imhuijeong92-ui/xmas-snow/releases/latest";
+    public const string Page = "https://github.com/imhuijeong92-ui/xmas-snow/releases/latest";
+    const string RepoPath = "/imhuijeong92-ui/xmas-snow/releases/download/";
+    public static string Folder;                  // snow.ps1 이 있는 폴더 (여기 파일을 바꿔 넣는다)
+    public static volatile string NewVersion, NewUrl;
+    public static volatile bool Checked, CheckFailed;  // 확인이 끝나면 Controller 가 다음 틱에 메뉴를 다시 만든다
+
+    static WebClient Client()
+    {
+        ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;  // TLS 1.2 (PowerShell 5.1 기본값이 낮다)
+        WebClient wc = new WebClient();
+        wc.Headers.Add("User-Agent", "XmasSnow/" + Version);  // 깃허브 API 는 User-Agent 가 없으면 거절한다
+        return wc;
+    }
+
+    // 이 저장소 릴리스 파일만 받는다 (호스트·경로를 따로, 문화권 무관하게 비교)
+    static bool IsOurs(string url)
+    {
+        Uri u;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out u)) return false;
+        return u.Scheme == "https" && string.Equals(u.Host, "github.com", StringComparison.OrdinalIgnoreCase)
+            && u.AbsolutePath.StartsWith(RepoPath, StringComparison.Ordinal) && !u.AbsolutePath.Contains("..");
+    }
+
+    // snow.ps1 위치를 모르면(붙여넣어 실행 등) 바꿔 넣을 수 없으니 업데이트를 내밀지 않는다
+    static bool CanInstall()
+    {
+        return !string.IsNullOrEmpty(Folder) && File.Exists(Path.Combine(Folder, "snow.ps1"));
+    }
+
+    // "1.10.0" > "1.9.2" 처럼 숫자 단위로 비교
+    public static bool IsNewer(string a, string b)
+    {
+        string[] x = a.Split('.'), y = b.Split('.');
+        for (int i = 0; i < Math.Max(x.Length, y.Length); i++)
+        {
+            int p = 0, q = 0;
+            if (i < x.Length) int.TryParse(x[i], out p);
+            if (i < y.Length) int.TryParse(y[i], out q);
+            if (p != q) return p > q;
+        }
+        return false;
+    }
+
+    // 깃허브에 최신 버전만 묻는다 (백그라운드)
+    public static void CheckAsync()
+    {
+        ThreadPool.QueueUserWorkItem(delegate
+        {
+            string v = null, url = null;
+            bool failed = false;
+            try
+            {
+                string json;
+                using (WebClient wc = Client()) json = wc.DownloadString(Feed);
+                Match tag = Regex.Match(json, "\"tag_name\"\\s*:\\s*\"[vV]?([0-9.]+)\"");
+                Match zip = Regex.Match(json, "\"browser_download_url\"\\s*:\\s*\"([^\"]*/XmasSnow-windows\\.zip)\"");
+                if (tag.Success && zip.Success && IsNewer(tag.Groups[1].Value, Version) && IsOurs(zip.Groups[1].Value) && CanInstall())
+                {
+                    v = tag.Groups[1].Value;
+                    url = zip.Groups[1].Value;
+                }
+            }
+            catch { failed = true; }
+            // 확인에 실패했을 때(오프라인·요청 제한)는 이미 떠 있던 업데이트 항목을 지우지 않는다
+            if (!failed) { NewVersion = v; NewUrl = url; }
+            CheckFailed = failed; Checked = true;
+        });
+    }
+
+    // 새 zip 을 받아 두고, 이 앱이 꺼진 뒤 PowerShell 이 풀어서 이 폴더에 덮어쓰고 다시 켠다
+    public static void Install(Action<bool> done)
+    {
+        string url = NewUrl;
+        ThreadPool.QueueUserWorkItem(delegate
+        {
+            bool ok = false;
+            try
+            {
+                string zip = Path.Combine(Path.GetTempPath(), "XmasSnow-update-" + Guid.NewGuid().ToString("N") + ".zip");
+                using (WebClient wc = Client()) wc.DownloadFile(url, zip);
+                // 명령은 파일로 써서 -File 로 돌린다 (-EncodedCommand 는 백신·회사 보안 프로그램이 막기 쉽다)
+                string ps1 = Path.Combine(Path.GetTempPath(), "XmasSnow-update-" + Guid.NewGuid().ToString("N") + ".ps1");
+                File.WriteAllText(ps1, Script(Process.GetCurrentProcess().Id, zip, ps1), new UTF8Encoding(true));
+                ProcessStartInfo psi = new ProcessStartInfo(PowerShell(),
+                    "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + ps1 + "\"");
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = true;
+                Process child = Process.Start(psi);
+                // 바로 막혀 꺼졌으면 실패로 보고 앱을 끄지 않는다
+                ok = child != null && !child.WaitForExit(1500);
+            }
+            catch { }
+            done(ok);
+        });
+    }
+
+    // 이 앱(pid)이 꺼지길 기다렸다가 zip 을 풀어 이 폴더에 덮어쓰고 다시 켜는 PowerShell 명령
+    public static string Script(int pid, string zip, string self)
+    {
+        return
+            "Wait-Process -Id " + pid + " -Timeout 30 -ErrorAction SilentlyContinue;" +
+            "try {" +
+            "$t = Join-Path $env:TEMP ('XmasSnow-update-' + [guid]::NewGuid());" +
+            "Expand-Archive -LiteralPath " + Quote(zip) + " -DestinationPath $t -Force -ErrorAction Stop;" +
+            "Get-ChildItem -LiteralPath (Join-Path $t 'XmasSnow') | Copy-Item -Destination " + Quote(Folder) + " -Force -ErrorAction Stop;" +
+            "Remove-Item -LiteralPath $t, " + Quote(zip) + ", " + Quote(self) + " -Recurse -Force -ErrorAction SilentlyContinue;" +
+            "} finally {" +  // 바꿔 넣다 실패해도 (예전 파일로라도) 다시 켠다
+            "Start-Process " + Quote(PowerShell()) + " -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File'," + Quote("\"" + Path.Combine(Folder, "snow.ps1") + "\"") + ",'-updated'}";
+    }
+
+    static string PowerShell()
+    {
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe");
+    }
+
+    // PowerShell 작은따옴표 문자열 ('' 로 이스케이프)
+    static string Quote(string s) { return "'" + s.Replace("'", "''") + "'"; }
 }
 
 // ── 이스터에그 ──────────────
@@ -1172,6 +1310,49 @@ class Controller
     int band;
     bool santaOn, snowmanOn, penguinOn, starOn, pileOn;
     readonly System.Windows.Forms.Timer starTimer = new System.Windows.Forms.Timer();
+    readonly System.Windows.Forms.Timer updateTimer = new System.Windows.Forms.Timer();
+    bool manualCheck, updating;
+    volatile int installResult;  // 설치 스레드 결과: 1 = 준비됨, -1 = 실패
+
+    void OnChecked()
+    {
+        if (!updating) BuildMenu();
+        if (!manualCheck) return;
+        manualCheck = false;
+        if (Updater.NewVersion != null) AskInstall();
+        else if (Updater.CheckFailed) MessageBox.Show("Couldn't check for updates.\nPlease check your internet connection and try again.", "Xmas Snow");
+        else MessageBox.Show("Xmas Snow v" + Updater.Version + " is the latest version. ✨", "You're up to date");
+    }
+
+    void AskInstall()
+    {
+        if (MessageBox.Show("Xmas Snow v" + Updater.NewVersion + " is available.\nYou have v" + Updater.Version + ". Update now? The snow will restart in a few seconds.",
+                "Xmas Snow update", MessageBoxButtons.YesNo) == DialogResult.Yes) StartInstall();
+    }
+
+    void StartInstall()
+    {
+        if (updating || Updater.NewUrl == null) return;
+        updating = true;
+        BuildMenu();
+        Updater.Install(delegate (bool ok) { installResult = ok ? 1 : -1; });
+    }
+
+    // 준비됐으면 쌓인 눈을 저장하고 끈다 → 뒤에서 PowerShell 이 파일을 바꾸고 다시 켠다. 실패하면 릴리스 페이지
+    void OnInstalled(bool ok)
+    {
+        if (ok)
+        {
+            foreach (PileForm p in piles) p.Save();
+            tray.Visible = false;
+            Application.Exit();
+            return;
+        }
+        updating = false;
+        BuildMenu();
+        MessageBox.Show("Couldn't update automatically.\nThe download page will open. Please replace the XmasSnow folder with the new one.", "Xmas Snow");
+        try { Process.Start(Updater.Page); } catch { }
+    }
 
     public Controller()
     {
@@ -1209,6 +1390,8 @@ class Controller
             last = now;
             foreach (SnowForm f in forms) f.Step(dt);
             foreach (PileForm p in piles) p.Step(dt);
+            if (Updater.Checked) { Updater.Checked = false; OnChecked(); }
+            if (installResult != 0) { bool ok = installResult > 0; installResult = 0; OnInstalled(ok); }
         };
         tick.Start();
 
@@ -1224,6 +1407,10 @@ class Controller
         };
         visitorTimer.Interval = 60000;
         visitorTimer.Start();
+        // 새 버전 확인 = 켜고 1분 뒤, 그 뒤로 12시간마다 (깃허브에 버전만 묻는다)
+        updateTimer.Tick += delegate { updateTimer.Interval = 12 * 3600 * 1000; Updater.CheckAsync(); };
+        updateTimer.Interval = 60000;
+        updateTimer.Start();
         // 별똥별 = 켜고 40초 뒤, 그 뒤로 1–3분마다 (짧아서 자주)
         starTimer.Tick += delegate { if (starOn) CallVisitor(2); starTimer.Interval = rnd.Next(60000, 180000); };
         starTimer.Interval = 40000;
@@ -1322,6 +1509,13 @@ class Controller
     void BuildMenu()
     {
         ContextMenuStrip m = new ContextMenuStrip();
+        if (Updater.NewVersion != null)
+        {
+            ToolStripMenuItem up = Item(updating ? "Updating to v" + Updater.NewVersion + "…" : "⬆ Update to v" + Updater.NewVersion, false, delegate { StartInstall(); });
+            up.Enabled = !updating;
+            m.Items.Add(up);
+            m.Items.Add(new ToolStripSeparator());
+        }
 
         ToolStripMenuItem amt = new ToolStripMenuItem("Snow amount");
         for (int i = 0; i < 3; i++)
@@ -1399,13 +1593,14 @@ class Controller
         story.Visible = false;
         m.Items.Add(story);
         m.Opening += delegate { story.Visible = (Control.ModifierKeys & Keys.Shift) != 0; };
+        m.Items.Add(Item("Check for updates… (v" + Updater.Version + ")", false, delegate { manualCheck = true; Updater.CheckAsync(); }));
         m.Items.Add(Item("Stop snow (Quit)", false, delegate { tray.Visible = false; Application.Exit(); }));
         tray.ContextMenuStrip = m;
     }
 }
 '@
 
-[XmasSnow]::Run()
+[XmasSnow]::Run($PSScriptRoot, ($args -contains '-updated'))
 } catch {
     $msg = ($_ | Out-String)
     $log = Join-Path $PSScriptRoot 'error.txt'
