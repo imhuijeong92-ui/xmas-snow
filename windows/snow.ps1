@@ -11,7 +11,9 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -736,6 +738,10 @@ class PileForm : Form
     readonly int u, cols, bmpH;       // u = 캔버스 1px 의 실제 픽셀(2px×배율)
     readonly int[] h;                 // 열별 높이(캔버스 px)
     readonly int[] cap;               // 열별 상한 — 가득 차도 윗면이 평평하지 않게 물결 모양
+    // 쌓인 높이·물결 모양을 모니터마다 레지스트리에 저장 → 다시 켜거나 화면이 바뀌어도 이어서 쌓인다
+    readonly double[] wave = new double[4];
+    readonly string saveName;
+    float saveClock;
     readonly Bitmap pileBmp;          // 쌓인 눈 (바탕 = 투명색)
     readonly Graphics pg;
     readonly ImageAttributes keyAttr = new ImageAttributes();
@@ -763,9 +769,15 @@ class PileForm : Form
         h = new int[cols];
         bmpH = (Cap + 20) * u;
         cap = new int[cols];
-        double p0 = rnd.NextDouble() * 2 * Math.PI, p1 = rnd.NextDouble() * 2 * Math.PI, p2 = rnd.NextDouble() * 2 * Math.PI, p3 = rnd.NextDouble() * 2 * Math.PI;
+        saveName = "pile-" + screen.DeviceName.Replace("\\", "").Replace(".", "");
+        int[] savedH = LoadPile();
+        if (savedH == null) for (int i = 0; i < 4; i++) wave[i] = rnd.NextDouble() * 2 * Math.PI;
+        double p0 = wave[0], p1 = wave[1], p2 = wave[2], p3 = wave[3];
         for (int i = 0; i < cols; i++)
             cap[i] = Cap + (int)Math.Round(6 * Math.Sin(i * 0.016 + p0) + 3 * Math.Sin(i * 0.047 + p1) + 1.5 * Math.Sin(i * 0.12 + p2) + 3.5 * Math.Abs(Math.Sin(i * 0.1 + p3)));  // 마지막 항 = 동글동글한 혹
+        // 저장해 둔 눈 더미 이어 붙이기 (해상도가 바뀌었으면 칸 수에 맞춰 늘이거나 줄인다)
+        if (savedH != null && savedH.Length > 0)
+            for (int i = 0; i < cols; i++) h[i] = Math.Min(cap[i], savedH[(int)((long)i * savedH.Length / cols)]);
         pileBmp = new Bitmap(cols * u, bmpH);
         pg = Graphics.FromImage(pileBmp);
         pg.Clear(Art.Key);
@@ -790,11 +802,46 @@ class PileForm : Form
         plowBmp[0] = Art.Sprite(PlowA, pc, Art.SpriteEdge);
         plowBmp[1] = Art.Sprite(b, pc, Art.SpriteEdge);
         rudBmp = Art.Sprite(RudolphRows, Math.Max(1, (int)Math.Round(4 * scale)), Art.Key);  // 루돌프는 회색 테두리 없이
+        if (savedH != null) RenderPile();
+    }
+
+    // 저장 형식 = "물결4개;높이,높이,…" (HKCU\Software\XmasSnow\Pile). 없거나 깨졌으면 null → 새로 쌓는다
+    int[] LoadPile()
+    {
+        try
+        {
+            using (RegistryKey k = Registry.CurrentUser.OpenSubKey(@"Software\XmasSnow\Pile"))
+            {
+                string s = k == null ? null : k.GetValue(saveName) as string;
+                if (s == null) return null;
+                string[] parts = s.Split(';');
+                string[] w = parts[0].Split(',');
+                for (int i = 0; i < 4; i++) wave[i] = double.Parse(w[i], CultureInfo.InvariantCulture);
+                string[] hs = parts[1].Split(',');
+                int[] r = new int[hs.Length];
+                for (int i = 0; i < hs.Length; i++) r[i] = int.Parse(hs[i], CultureInfo.InvariantCulture);
+                return r;
+            }
+        }
+        catch { return null; }
+    }
+
+    public void Save()
+    {
+        try
+        {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < 4; i++) sb.Append(i == 0 ? "" : ",").Append(wave[i].ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(';');
+            for (int i = 0; i < cols; i++) sb.Append(i == 0 ? "" : ",").Append(h[i]);
+            using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\XmasSnow\Pile")) k.SetValue(saveName, sb.ToString());
+        }
+        catch { }
     }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { pg.Dispose(); pileBmp.Dispose(); }
+        if (disposing) { Save(); pg.Dispose(); pileBmp.Dispose(); }
         base.Dispose(disposing);
     }
 
@@ -874,6 +921,8 @@ class PileForm : Form
     public void Step(float dt)
     {
         clock += dt;
+        saveClock += dt;
+        if (saveClock >= 10f) { saveClock = 0; Save(); }  // 10초마다
 
         // 눈이 덜 내리면(낮은 띠·적은 양) 그만큼 느리게 쌓인다. 가득 차면 더는 안 자란다.
         float ratio = SnowForm.BandRatio[band];
@@ -934,7 +983,7 @@ class PileForm : Form
                 cleared = front;
                 dirty = true;
             }
-            if (plowX >= Width) plowing = false;
+            if (plowX >= Width) { plowing = false; Save(); }
         }
 
         for (int i = sparks.Count - 1; i >= 0; i--)
@@ -1112,7 +1161,7 @@ class Controller
         RebuildPiles();
     }
 
-    // 쌓인 눈 창 = 모니터마다 하나(눈 쌓기를 끄면 치워서 숨긴다). 쌓인 높이는 초기화된다.
+    // 쌓인 눈 창 = 모니터마다 하나(눈 쌓기를 끄면 치워서 숨긴다). 쌓인 높이는 저장해 두었다가 이어 붙인다.
     void RebuildPiles()
     {
         foreach (PileForm p in piles) p.Close();

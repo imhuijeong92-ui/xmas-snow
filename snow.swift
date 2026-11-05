@@ -730,6 +730,10 @@ final class PileWindow: NSPanel {
     var hoverTimer: Timer?
     var dockUp = false             // 커서가 화면 아래 끝에 닿아 독이 올라온 상태 — 이때 독 높이 안의 클릭은 독 몫
     let dockBand: CGFloat
+    // 쌓인 높이·물결 모양을 화면마다 저장 → 앱을 다시 켜거나 화면이 바뀌어도 이어서 쌓인다
+    let saveKey: String
+    var ph: [CGFloat] = []
+    var saveTick = 0
     let front: NSPanel            // 제설차·루돌프·말풍선은 독 앞에 보이도록 위층 창에
     var frontRoot: CALayer { front.contentView!.layer! }
     // 다 차는 데 걸리는 시간 = 6분 ÷ (눈 양 × 눈 높이 비율) → 눈이 적게 내리면 그만큼 천천히 쌓인다
@@ -750,6 +754,8 @@ final class PileWindow: NSPanel {
         let tile = CGFloat(dock?.object(forKey: "tilesize") as? Double ?? 48)
         let big = dock?.bool(forKey: "magnification") == true ? CGFloat(dock?.object(forKey: "largesize") as? Double ?? 64) : 0
         dockBand = side ? 0 : max(tile, big) + 28
+        let display = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+        saveKey = "pile-\(display)"
         super.init(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         self.amountFactor = amountFactor
         hidesOnDeactivate = false
@@ -783,8 +789,11 @@ final class PileWindow: NSPanel {
 
         let cols = Int(ceil(rect.width / pilePx))
         heights = Array(repeating: 0, count: cols)
+        let saved = UserDefaults.standard.dictionary(forKey: saveKey)
         // 큰 둔덕 + 작은 굴곡 + 동글한 혹을 겹친 물결 (모니터마다 모양이 다르다)
-        let ph = (0..<4).map { _ in CGFloat.random(in: 0..<(2 * .pi)) }
+        let savedPh = (saved?["ph"] as? [Double])?.map { CGFloat($0) }
+        ph = savedPh?.count == 4 ? savedPh! : (0..<4).map { _ in CGFloat.random(in: 0..<(2 * .pi)) }
+        let ph = self.ph
         capMap = (0..<cols).map { i in
             let x = CGFloat(i)
             let wave: CGFloat = 6 * sin(x * 0.016 + ph[0]) + 3 * sin(x * 0.047 + ph[1]) + 1.5 * sin(x * 0.12 + ph[2])
@@ -801,8 +810,13 @@ final class PileWindow: NSPanel {
         pileShape.frame = pile.bounds
         pile.mask = pileShape
         view.layer?.addSublayer(pile)
+        // 저장해 둔 눈 더미 이어 붙이기 (해상도가 바뀌었으면 칸 수에 맞춰 늘이거나 줄인다)
+        if let h = saved?["h"] as? [Int], !h.isEmpty {
+            heights = (0..<cols).map { i in min(capMap[i], h[i * h.count / cols]) }
+            redraw()
+        }
 
-        growTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.grow(1) }
+        growTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.grow(1); self?.autosave() }
         // 평소엔 클릭이 통과하고, 커서가 쌓인 눈이나 루돌프 위에 있을 때만 클릭을 받는다
         hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             guard let self = self else { return }
@@ -817,7 +831,17 @@ final class PileWindow: NSPanel {
         }
     }
 
+    func save() {
+        UserDefaults.standard.set(["h": heights, "ph": ph.map { Double($0) }], forKey: saveKey)
+    }
+
+    func autosave() {
+        saveTick += 1
+        if saveTick % 10 == 0 { save() }  // 10초마다
+    }
+
     func stop() {
+        save()
         growTimer?.invalidate()
         hoverTimer?.invalidate()
         front.orderOut(nil)
@@ -1054,6 +1078,7 @@ final class PileWindow: NSPanel {
                 spray.birthRate = 0
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { spray.removeFromSuperlayer() }
                 self.plow = nil
+                self.save()
             }
         }
     }
@@ -1139,6 +1164,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var starTimer: Timer?
     var santaTimer: Timer?
     var visitorTimer: Timer?
+
+    func applicationWillTerminate(_ n: Notification) { piles.forEach { $0.save() } }
 
     func applicationDidFinishLaunching(_ n: Notification) {
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
