@@ -450,7 +450,7 @@ extension SnowWindow {
         CATransaction.commit()
     }
 
-    func flySanta(then done: @escaping () -> Void = {}) {
+    func flySanta(talk: Bool = false, then done: @escaping () -> Void = {}) {
         guard let root = contentView?.layer else { done(); return }
         let px: CGFloat = 3
         let size = CGSize(width: CGFloat(santaSprite.width) * px, height: CGFloat(santaSprite.height) * px)
@@ -514,6 +514,13 @@ extension SnowWindow {
         sprite.add(fly, forKey: "fly")
         trail.add(tail, forKey: "fly")
         CATransaction.commit()
+        // 화면의 3분의 1쯤 왔을 때 크리스마스까지 며칠 남았는지 말해 준다 (말풍선은 산타를 따라간다)
+        if talk {
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration * 0.3) { [weak self, weak sprite] in
+                guard let self = self, let sprite = sprite, sprite.superlayer != nil else { return }
+                makeBubble(christmasCountdown(), on: sprite, root: root, scale: self.backingScaleFactor, stay: 3.5)
+            }
+        }
 
         // 루돌프 코끝이 화면 오른쪽 끝에 닿으면 다음 모니터에서 출발
         let edgeAt = duration * Double((w + size.width / 2) / (w + size.width * 2))
@@ -864,7 +871,45 @@ final class PileWindow: NSPanel {
     }
 
     func clicked(at p: CGPoint) {
-        if onDeer(p) || onPile(p) { puff(at: p); hideDeer(); sendPlow() }
+        if onDeer(p) { tapDeer(at: p) }
+        else if onPile(p) { puff(at: p); hideDeer(); sendPlow() }
+    }
+
+    // 루돌프를 한 번 누르면 제설차, 연달아 5번 누르면 제설차 대신 비밀 이야기 (이스터에그)
+    var deerTaps = 0
+    var deerTapTimer: Timer?
+    var telling = false
+
+    func tapDeer(at p: CGPoint) {
+        guard !telling else { return }
+        puff(at: p)
+        deerTaps += 1
+        deerTapTimer?.invalidate()
+        if deerTaps >= 5 { deerTaps = 0; tellStory(); return }
+        deerTapTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            self.deerTaps = 0
+            self.hideDeer()
+            self.sendPlow()
+        }
+    }
+
+    func tellStory() {
+        guard let d = deer else { return }
+        telling = true
+        d.sublayers?.forEach { $0.removeFromSuperlayer() }  // "Time to clear the snow?" 말풍선 치우기
+        let lines = deerStories[nextIndex("deerStory", count: deerStories.count)]
+        for (i, line) in lines.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3 + Double(i) * 3) { [weak self, weak d] in
+                guard let self = self, let d = d, self.deer === d else { return }
+                d.sublayers?.forEach { $0.removeFromSuperlayer() }
+                makeBubble(line, on: d, root: self.frontRoot, scale: self.backingScaleFactor, stay: 2.8)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3 + Double(lines.count) * 3 + 0.5) { [weak self] in
+            self?.telling = false
+            self?.hideDeer()
+        }
     }
 
     // 누른 자리에서 바로 '퐁' — 하얀 고리가 퍼지고 눈꽃이 위로 튀어 오른다 (눌렸다는 걸 바로 알게)
@@ -984,7 +1029,7 @@ final class PileWindow: NSPanel {
             _ = makeBubble("Time to clear the snow? ❄️", on: d, root: root, scale: self.backingScaleFactor, stay: 7)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self, weak d] in
-            guard let self = self, let d = d, self.deer === d else { return }
+            guard let self = self, let d = d, self.deer === d, !self.telling, self.deerTaps == 0 else { return }
             self.hideDeer()
         }
     }
@@ -1084,6 +1129,41 @@ final class PileWindow: NSPanel {
     }
 }
 
+// ── 이스터에그 ──────────────
+// 빼꼼 나온 루돌프를 5번 연달아 누르면 한 줄씩 들려주는 비밀 이야기 (누를 때마다 다음 이야기)
+let deerStories: [[String]] = [
+    ["Psst… my nose isn't a light bulb.", "It glows when someone I love is near.", "…it's glowing right now. ❤️"],
+    ["I practice landing on your roof every year.", "Santa says I'm getting better.", "Last year I only bumped one chimney."],
+    ["I keep one snowflake from every Christmas.", "This year's is going to be yours. ❄️"],
+    ["Santa reads every letter twice.", "Once for the wish.", "Once for the person who wrote it. 💌"],
+]
+// ⌥ Option 을 누른 채 ❄︎ 메뉴를 열면 보이는 'A little story' — 고를 때마다 다음 이야기
+let littleStories: [(title: String, text: String)] = [
+    ("The Smallest Snowflake", "The smallest snowflake was scared to fall.\n\"What if no one ever sees me?\"\n\nIt took a deep breath and let go…\nand landed right on your screen.\n\nYou saw it. ✨"),
+    ("The Snowman's Scarf", "A snowman saw a little penguin shivering in the wind.\nHe took off his red scarf and wrapped it around her.\n\n\"Won't you be cold?\" asked the penguin.\n\"I'm a snowman,\" he laughed.\n\"But my heart feels warm now.\" 🧣"),
+    ("Santa's Last Cookie", "After the very last chimney, Santa sat down on a quiet rooftop.\nHe took out one cookie he had saved all night.\n\n\"This one,\" he told Rudolph, \"is for me.\"\n\nResting is a gift, too. 🍪"),
+]
+// 다음 차례 번호를 저장해 두고 하나씩 넘긴다
+func nextIndex(_ key: String, count: Int) -> Int {
+    let i = UserDefaults.standard.integer(forKey: key) % count
+    UserDefaults.standard.set((i + 1) % count, forKey: key)
+    return i
+}
+
+// 지나가는 산타가 알려 주는 크리스마스 디데이 (12/26 부터는 다음 해 크리스마스까지)
+func christmasCountdown(_ now: Date = Date()) -> String {
+    let cal = Calendar.current
+    let today = cal.startOfDay(for: now)
+    var xmas = cal.date(from: DateComponents(year: cal.component(.year, from: today), month: 12, day: 25))!
+    if xmas < today { xmas = cal.date(byAdding: .year, value: 1, to: xmas)! }
+    let days = cal.dateComponents([.day], from: today, to: xmas).day ?? 0
+    switch days {
+    case 0: return "Merry Christmas! 🎄"
+    case 1: return "It's Christmas Eve! Big night tonight 🎅"
+    default: return "\(days) days until Christmas! 🎄"
+    }
+}
+
 // 테두리 없는 흰 둥근 말풍선을 sprite 위(자리 없으면 아래)에 붙이고 stay 초 뒤 사라지게 한다
 @discardableResult
 func makeBubble(_ message: String, on sprite: CALayer, root: CALayer, scale: CGFloat, stay: Double = 2.5) -> CALayer {
@@ -1151,7 +1231,7 @@ func makeBubble(_ message: String, on sprite: CALayer, root: CALayer, scale: CGF
     return box
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var windows: [SnowWindow] = []
     var piles: [PileWindow] = []
     var amountFactor: CGFloat { [0.25, 1, 2][amount.rawValue] }
@@ -1192,6 +1272,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--demo4") {  // 눈 더미 채워 두고 제설차
             piles.forEach { p in p.carry = 9000; p.grow(0) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.piles.forEach { $0.puff(at: CGPoint(x: 300, y: 30)); $0.hideDeer() }; self.callPlow() }
+        }
+        if CommandLine.arguments.contains("--demo5") {  // 이스터에그: 루돌프 이야기 → 산타 디데이 → 숨은 동화
+            piles.forEach { p in p.carry = 9000; p.grow(0) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.piles.forEach { $0.tellStory() } }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 12) { self.callSanta() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 22) { self.showStory() }
         }
         if CommandLine.arguments.contains("--demo") {
             callSanta()
@@ -1266,7 +1352,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func fly(_ order: [SnowWindow], _ i: Int) {
         guard i < order.count else { santaFlying = false; return }
-        order[i].flySanta { [weak self] in self?.fly(order, i + 1) }
+        // 디데이는 한 번만 — 커서가 있는 화면(지금 보고 있을 화면)을 지날 때
+        let m = NSEvent.mouseLocation
+        let talk = order.contains { $0.screen?.frame.contains(m) == true } ? order[i].screen?.frame.contains(m) == true : i == 0
+        order[i].flySanta(talk: talk) { [weak self] in self?.fly(order, i + 1) }
     }
 
     func callVisitor(_ who: String) {
@@ -1344,9 +1433,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                        item("Shooting star 🌠", #selector(callStar)),
                                        item("Snowplow 🚜", #selector(callPlow))]))
         m.addItem(.separator())
+        // 이스터에그: ⌥ Option 을 누른 채 열 때만 보인다 (menuWillOpen)
+        storyItem = item("📖 A little story", #selector(showStory))
+        storyItem?.isHidden = true
+        m.addItem(storyItem!)
         let quit = NSMenuItem(title: "Stop snow (Quit)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         m.addItem(quit)
+        m.delegate = self
         status.menu = m
+    }
+
+    var storyItem: NSMenuItem?
+
+    func menuWillOpen(_ menu: NSMenu) {
+        storyItem?.isHidden = !NSEvent.modifierFlags.contains(.option)
+    }
+
+    @objc func showStory() {
+        let s = littleStories[nextIndex("littleStory", count: littleStories.count)]
+        let a = NSAlert()
+        a.messageText = s.title
+        a.informativeText = s.text
+        a.icon = NSImage(cgImage: peekDeer, size: NSSize(width: peekDeer.width * 4, height: peekDeer.height * 4))
+        a.addButton(withTitle: "Merry Christmas 🎄")
+        NSApp.activate(ignoringOtherApps: true)
+        a.runModal()
     }
 
     @objc func pick(_ sender: NSMenuItem) {

@@ -118,6 +118,52 @@ static class Art
     }
 }
 
+// ── 이스터에그 ──────────────
+static class Story
+{
+    // 빼꼼 나온 루돌프를 5번 연달아 누르면 한 줄씩 들려주는 비밀 이야기 (누를 때마다 다음 이야기)
+    public static readonly string[][] Deer = {
+        new string[] { "Psst… my nose isn't a light bulb.", "It glows when someone I love is near.", "…it's glowing right now. ❤️" },
+        new string[] { "I practice landing on your roof every year.", "Santa says I'm getting better.", "Last year I only bumped one chimney." },
+        new string[] { "I keep one snowflake from every Christmas.", "This year's is going to be yours. ❄️" },
+        new string[] { "Santa reads every letter twice.", "Once for the wish.", "Once for the person who wrote it. 💌" },
+    };
+    // Shift 를 누른 채 ❄ 메뉴를 열면 보이는 'A little story' — 고를 때마다 다음 이야기
+    public static readonly string[] LittleTitle = { "The Smallest Snowflake", "The Snowman's Scarf", "Santa's Last Cookie" };
+    public static readonly string[] LittleText = {
+        "The smallest snowflake was scared to fall.\n\"What if no one ever sees me?\"\n\nIt took a deep breath and let go…\nand landed right on your screen.\n\nYou saw it. ✨",
+        "A snowman saw a little penguin shivering in the wind.\nHe took off his red scarf and wrapped it around her.\n\n\"Won't you be cold?\" asked the penguin.\n\"I'm a snowman,\" he laughed.\n\"But my heart feels warm now.\" 🧣",
+        "After the very last chimney, Santa sat down on a quiet rooftop.\nHe took out one cookie he had saved all night.\n\n\"This one,\" he told Rudolph, \"is for me.\"\n\nResting is a gift, too. 🍪",
+    };
+
+    // 다음 차례 번호를 레지스트리에 저장해 두고 하나씩 넘긴다
+    public static int Next(string name, int count)
+    {
+        try
+        {
+            using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\XmasSnow"))
+            {
+                int i = ((int)k.GetValue(name, 0) % count + count) % count;
+                k.SetValue(name, (i + 1) % count, RegistryValueKind.DWord);
+                return i;
+            }
+        }
+        catch { return 0; }
+    }
+
+    // 지나가는 산타가 알려 주는 크리스마스 디데이 (12/26 부터는 다음 해 크리스마스까지)
+    public static string Countdown()
+    {
+        DateTime today = DateTime.Today;
+        DateTime xmas = new DateTime(today.Year, 12, 25);
+        if (xmas < today) xmas = xmas.AddYears(1);
+        int days = (int)(xmas - today).TotalDays;
+        if (days == 0) return "Merry Christmas! 🎄";
+        if (days == 1) return "It's Christmas Eve! Big night tonight 🎅";
+        return days + " days until Christmas!";
+    }
+}
+
 class Flake
 {
     public float X, Y, VY, MeltY;
@@ -195,6 +241,8 @@ class SnowForm : Form
     bool santa;
     float santaT, santaY, santaDur, clock;
     float bubbleT;   // 산타를 클릭하면 이 시간(초) 동안 "메리 크리스마스!" 말풍선
+    string santaText = "Merry Christmas!";
+    bool santaTalk;  // 이번 비행에서 크리스마스 디데이를 말할 차례
     bool wasDown;
 
     [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
@@ -270,10 +318,11 @@ class SnowForm : Form
 
     Action onEdge;  // 루돌프 코끝이 오른쪽 끝에 닿으면 부른다 → 다음 모니터 출발
 
-    public void CallSanta(Action reachedEdge)
+    public void CallSanta(Action reachedEdge, bool talk)
     {
         if (santa) { if (reachedEdge != null) reachedEdge(); return; }
         onEdge = reachedEdge;
+        santaTalk = talk;
         santa = true;
         santaT = 0;
         santaY = Height * (0.3f + (float)rnd.NextDouble() * 0.25f);
@@ -344,6 +393,8 @@ class SnowForm : Form
                 onEdge = null;
                 a();
             }
+            // 화면의 3분의 1쯤 왔을 때 크리스마스까지 며칠 남았는지 말해 준다
+            if (santaTalk && santaT >= santaDur * 0.3f) { santaTalk = false; santaText = Story.Countdown(); bubbleOwner = this; bubbleT = 3.5f; }
             if (santaT >= santaDur) { santa = false; if (bubbleOwner == this) bubbleT = 0; }
             else
             {
@@ -410,7 +461,7 @@ class SnowForm : Form
         if (down && !wasDown)
         {
             Point c = Cursor.Position;
-            if (santa && Hit(SantaPos(), santaBmp, c)) { bubbleOwner = this; bubbleT = 2.5f; DropGifts(SantaPos(), santaBmp.Width, true); }
+            if (santa && Hit(SantaPos(), santaBmp, c)) { santaText = "Merry Christmas!"; bubbleOwner = this; bubbleT = 2.5f; DropGifts(SantaPos(), santaBmp.Width, true); }
             foreach (Walker wk in walkers)
             {
                 if (wk.Caught) continue;
@@ -599,7 +650,7 @@ class SnowForm : Form
                 using (SolidBrush b = new SolidBrush(Color.FromArgb(255, 120, 120)))
                     g.FillRectangle(b, (int)p.X + santaBmp.Width - c * 2, (int)p.Y + c * 5 - c / 2, c * 2, c * 2);
             }
-            if (bubbleT > 0 && bubbleOwner == this) DrawBubble(g, p, santaBmp.Height, santaBmp.Width);
+            if (bubbleT > 0 && bubbleOwner == this) DrawBubble(g, p, santaBmp.Height, santaText, Tree, "Segoe UI", santaBmp.Width);
         }
     }
 
@@ -750,6 +801,10 @@ class PileForm : Form
     readonly List<Spark> sparks = new List<Spark>();
     float debt, clock, plowX, rudT, lastPeek;
     bool dirty = true, wasDown, plowing, rud, peeked;
+    // 루돌프를 한 번 누르면 제설차, 연달아 5번 누르면 제설차 대신 비밀 이야기 (이스터에그)
+    int deerTaps;
+    float tapWait, storyT;
+    string[] story;
     int cleared;                      // 제설날 뒤로 이미 비운 열 수
 
     [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
@@ -862,6 +917,8 @@ class PileForm : Form
     {
         if (plowing) return;
         rud = false;
+        story = null;
+        deerTaps = 0;
         plowing = true;
         plowX = -plowBmp[0].Width;
         cleared = 0;
@@ -941,7 +998,19 @@ class PileForm : Form
         if (rud)
         {
             rudT += dt;
+            if (story != null)
+            {
+                rudT = Math.Min(rudT, 4f);  // 이야기하는 동안은 들어가지 않는다
+                storyT += dt;
+                if (storyT >= story.Length * 3f + 0.5f) { story = null; rudT = 8f; }  // 다 말하면 쏙
+                dirty = true;
+            }
             if (rudT >= 8.5f) rud = false;
+        }
+        if (deerTaps > 0)
+        {
+            tapWait -= dt;
+            if (tapWait <= 0) { deerTaps = 0; StartPlow(); }
         }
 
         // 창은 클릭을 통과시키므로, 왼쪽 버튼이 눌린 순간 커서가 쌓인 눈이나 루돌프 위였는지 직접 본다
@@ -949,20 +1018,28 @@ class PileForm : Form
         if (down && !wasDown && !plowing)
         {
             Point c = Cursor.Position;
-            bool hit = false;
+            bool onDeer = false, onPile = false;
             if (rud)
             {
                 PointF rp = RudPos();
                 float m = 6 * scale;
-                if (new RectangleF(Left + rp.X - m, Top + rp.Y - m, rudBmp.Width + m * 2, rudBmp.Height + m * 2).Contains(c)) hit = true;
+                if (new RectangleF(Left + rp.X - m, Top + rp.Y - m, rudBmp.Width + m * 2, rudBmp.Height + m * 2).Contains(c)) onDeer = true;
             }
             int ci = (c.X - Left) / u;
-            if (!hit && c.X >= Left && ci >= 0 && ci < cols && h[ci] >= 3)
+            if (!onDeer && c.X >= Left && ci >= 0 && ci < cols && h[ci] >= 3)
             {
                 float top = Top + Height - h[ci] * u - 6 * scale;  // 눈 높이 + 여유 6px
-                if (c.Y >= top && c.Y <= Top + Height) hit = true;
+                if (c.Y >= top && c.Y <= Top + Height) onPile = true;
             }
-            if (hit) { Puff(c.X - Left, c.Y - Top); StartPlow(); }
+            if (onDeer && story == null)
+            {
+                // 루돌프: 0.6초 안에 다시 안 누르면 제설차, 5번 연달아 누르면 이야기
+                Puff(c.X - Left, c.Y - Top);
+                deerTaps++;
+                tapWait = 0.6f;
+                if (deerTaps >= 5) { deerTaps = 0; story = Story.Deer[Story.Next("deerStory", Story.Deer.Length)]; storyT = 0; rudT = Math.Max(rudT, 0.5f); }
+            }
+            else if (onPile) { Puff(c.X - Left, c.Y - Top); StartPlow(); }
         }
         wasDown = down;
 
@@ -1067,7 +1144,13 @@ class PileForm : Form
             int bounce = ((int)(clock / 0.12f) % 2) * (int)Math.Round(2 * scale);  // 덜컹덜컹
             g.DrawImageUnscaled(b, (int)plowX, Height - b.Height - bounce);
         }
-        if (rud && rudT >= 0.5f && rudT < 7.5f)
+        if (rud && story != null)
+        {
+            int line = (int)(storyT / 3f);
+            if (line < story.Length && storyT - line * 3f < 2.8f)
+                SnowForm.DrawBubbleAt(g, rp, rudBmp.Height, story[line], SnowForm.Tree, "Segoe UI", scale, Width, Height, rudBmp.Width);
+        }
+        else if (rud && rudT >= 0.5f && rudT < 7.5f)
             SnowForm.DrawBubbleAt(g, rp, rudBmp.Height, "Time to clear the snow? ❄️", SnowForm.Tree, "Segoe UI", scale, Width, Height, rudBmp.Width);
     }
 }
@@ -1201,7 +1284,12 @@ class Controller
     void Fly(List<SnowForm> order, int i)
     {
         if (i >= order.Count || order[i].IsDisposed) return;
-        order[i].CallSanta(delegate { Fly(order, i + 1); });
+        // 디데이는 한 번만 — 커서가 있는 모니터(지금 보고 있을 화면)를 지날 때
+        Point c = Cursor.Position;
+        bool any = false;
+        foreach (SnowForm f in order) if (Screen.FromControl(f).Bounds.Contains(c)) any = true;
+        bool talk = any ? Screen.FromControl(order[i]).Bounds.Contains(c) : i == 0;
+        order[i].CallSanta(delegate { Fly(order, i + 1); }, talk);
     }
 
     void Save()
@@ -1302,6 +1390,15 @@ class Controller
         m.Items.Add(call);
 
         m.Items.Add(new ToolStripSeparator());
+        // 이스터에그: Shift 를 누른 채 ❄ 아이콘을 오른쪽 클릭할 때만 보인다
+        ToolStripMenuItem story = Item("📖 A little story", false, delegate
+        {
+            int i = Story.Next("littleStory", Story.LittleTitle.Length);
+            MessageBox.Show(Story.LittleText[i], Story.LittleTitle[i], MessageBoxButtons.OK, MessageBoxIcon.None);
+        });
+        story.Visible = false;
+        m.Items.Add(story);
+        m.Opening += delegate { story.Visible = (Control.ModifierKeys & Keys.Shift) != 0; };
         m.Items.Add(Item("Stop snow (Quit)", false, delegate { tray.Visible = false; Application.Exit(); }));
         tray.ContextMenuStrip = m;
     }
