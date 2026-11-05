@@ -17,7 +17,7 @@ It sits on top of everything but never blocks your clicks, so you can keep worki
   - A falling treat → it pops into pixel confetti
   - The snow pile (or Rudolph) → Santa drives by in a snowplow 🚜 and clears it
 - **Snow piles up** in soft, lumpy drifts along the bottom of your screen — behind the Dock on macOS, just above the taskbar on Windows. Less snow or a lower snow height means it piles up more slowly. Once it reaches its full height it stays there, and Rudolph peeks in from the right edge to ask *"Time to clear the snow?"*
-- A few **little Christmas stories** are hidden in there too. Rudolph might tell you one if you're persistent 🤫
+- A few **little Christmas stories** are hidden in there too. Rudolph might tell you one if you're persistent 🤫 — and the ❄︎ menu keeps a storybook for anyone who opens it with the right key held down (psst: ⌥ on Mac, Shift on Windows) 📖
 - Works across **multiple monitors** — Santa flies from one screen to the next
 - Light on resources: under 1% of total CPU on an M1 Mac (about 6–7% of one core) and about 27 MB of memory
 
