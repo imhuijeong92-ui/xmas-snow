@@ -20,6 +20,11 @@ var santaSpeedIndex = UserDefaults.standard.object(forKey: "santaSpeed") as? Int
 var santaSpeed: CGFloat { santaSpeeds[min(max(santaSpeedIndex, 0), santaSpeeds.count - 1)].speed }
 // --stage = README 미리보기 녹화용. 밤하늘 배경을 깔고(뒤 화면이 안 찍히게) 모든 친구를 차례로 보여 준다. 설정은 저장하지 않는다
 let stageMode = CommandLine.arguments.contains("--stage")
+// --stage-desk <그림> = README 두 번째 미리보기. 가짜 업무 화면 그림을 깔고 눈 높이 1/8 로 '일하면서 쓰는 모습'을 보여 준다
+let deskBackdrop: String? = CommandLine.arguments.firstIndex(of: "--stage-desk").flatMap { i in
+    i + 1 < CommandLine.arguments.count ? CommandLine.arguments[i + 1] : nil
+}
+let recording = stageMode || deskBackdrop != nil  // 녹화 중: 맨 위 층에 띄우고, 쌓인 눈은 저장하지 않는다
 
 // 내리는 속도(눈·간식 모두). 메뉴에서 고른다.
 let fallSpeeds: [(title: String, mul: CGFloat)] = [("Slow", 0.6), ("Normal", 1), ("Fast", 1.6)]
@@ -88,7 +93,7 @@ final class SnowWindow: NSPanel {
         hasShadow = false
         ignoresMouseEvents = true
         isReleasedWhenClosed = false
-        level = stageMode ? .screenSaver : .statusBar  // 녹화 때는 다른 앱·펫이 안 찍히게 맨 위
+        level = recording ? .screenSaver : .statusBar  // 녹화 때는 다른 앱·펫이 안 찍히게 맨 위
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
 
         let view = ClickView(frame: NSRect(origin: .zero, size: band.size))
@@ -771,7 +776,7 @@ final class PileWindow: NSPanel {
         hasShadow = false
         ignoresMouseEvents = true
         isReleasedWhenClosed = false
-        level = stageMode ? NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
+        level = recording ? NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
                           : NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)) - 1)
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
 
@@ -787,7 +792,7 @@ final class PileWindow: NSPanel {
         front.hasShadow = false
         front.ignoresMouseEvents = true
         front.isReleasedWhenClosed = false
-        front.level = stageMode ? NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 2) : .statusBar
+        front.level = recording ? NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 2) : .statusBar
         front.collectionBehavior = collectionBehavior
         let fv = ClickView(frame: NSRect(origin: .zero, size: rect.size))
         fv.wantsLayer = true
@@ -797,7 +802,7 @@ final class PileWindow: NSPanel {
 
         let cols = Int(ceil(rect.width / pilePx))
         heights = Array(repeating: 0, count: cols)
-        let saved = stageMode ? nil : UserDefaults.standard.dictionary(forKey: saveKey)
+        let saved = recording ? nil : UserDefaults.standard.dictionary(forKey: saveKey)
         // 큰 둔덕 + 작은 굴곡 + 동글한 혹을 겹친 물결 (모니터마다 모양이 다르다)
         let savedPh = (saved?["ph"] as? [Double])?.map { CGFloat($0) }
         ph = savedPh?.count == 4 ? savedPh! : (0..<4).map { _ in CGFloat.random(in: 0..<(2 * .pi)) }
@@ -840,7 +845,7 @@ final class PileWindow: NSPanel {
     }
 
     func save() {
-        guard !stageMode else { return }  // 녹화용 눈 더미가 진짜 쌓인 눈을 덮어쓰지 않게
+        guard !recording else { return }  // 녹화용 눈 더미가 진짜 쌓인 눈을 덮어쓰지 않게
         UserDefaults.standard.set(["h": heights, "ph": ph.map { Double($0) }], forKey: saveKey)
     }
 
@@ -1291,8 +1296,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         status.button?.title = "❄︎"
         buildMenu()
         if stageMode { bandIndex = 4; santaSpeedIndex = 2; amount = .normal }
+        if deskBackdrop != nil { bandIndex = 0; santaSpeedIndex = 2; amount = .normal }
         rebuild()
         if stageMode { stage(); return }
+        if let path = deskBackdrop { deskStage(path); return }
         NotificationCenter.default.addObserver(self, selector: #selector(rebuild),
                                                name: NSApplication.didChangeScreenParametersNotification, object: nil)
         scheduleSanta(first: true)
@@ -1360,6 +1367,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // 눈사람·펭귄(켠 것만) = 켜고 1분 뒤, 그 뒤로 3–7분마다 아무 모니터에서
+    // README 두 번째 미리보기: 가짜 업무 화면 위 1/8 띠에 눈 → 산타 디데이 → 루돌프 빼꼼 → 제설차
+    var backdrop: NSWindow?
+    func deskStage(_ path: String) {
+        guard let img = NSImage(contentsOfFile: path), let s = NSScreen.screens.first, let w = windows.first else { return }
+        let b = NSWindow(contentRect: s.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        b.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue - 1)  // 눈 창 바로 아래
+        let v = NSImageView(frame: NSRect(origin: .zero, size: s.frame.size))
+        v.image = img
+        v.imageScaling = .scaleAxesIndependently
+        b.contentView = v
+        b.orderFrontRegardless()
+        backdrop = b
+        func at(_ t: Double, _ f: @escaping () -> Void) { DispatchQueue.main.asyncAfter(deadline: .now() + t, execute: f) }
+        w.treatDebt = 3
+        if let p = piles.first { p.lastPeek = Date(); p.carry = 9000; p.grow(0) }
+        at(1.0) { w.flySanta(talk: true) }
+        if let p = piles.first {
+            at(6.5) { p.peek() }
+            at(9.5) {
+                if let d = p.deer { p.puff(at: (d.presentation() ?? d).position) }
+                p.hideDeer()
+                p.sendPlow()
+            }
+        }
+    }
+
     func scheduleVisitor(first: Bool = false) {
         visitorTimer?.invalidate()
         visitorTimer = Timer.scheduledTimer(withTimeInterval: first ? 60 : Double.random(in: 180...420), repeats: false) { [weak self] _ in
@@ -1652,7 +1685,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         windows = NSScreen.screens.map { SnowWindow(screen: $0, amount: amount) }
         windows.forEach { $0.orderFrontRegardless() }
         piles.forEach { $0.stop(); $0.orderOut(nil) }
-        piles = stageMode ? [PileWindow(screen: NSScreen.screens[0], amountFactor: amountFactor)]
+        piles = recording ? [PileWindow(screen: NSScreen.screens[0], amountFactor: amountFactor)]
               : pileOn ? NSScreen.screens.map { PileWindow(screen: $0, amountFactor: amountFactor) } : []
         piles.forEach { $0.show() }
     }

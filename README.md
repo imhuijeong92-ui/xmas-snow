@@ -6,6 +6,10 @@ It sits on top of everything but never blocks your clicks, so you can keep worki
 
 ![Xmas Snow demo](docs/demo.gif)
 
+Set the snow height to **1/8** and it stays in a thin strip along the top while you work — everything underneath still takes your clicks:
+
+![Xmas Snow at 1/8 height over a web page](docs/desk.gif)
+
 ## What it does
 
 - **Pixel snowflakes** that sway left and right as they fall
@@ -73,7 +77,7 @@ open XmasSnow.app
 
 Requires the Xcode command line tools (`swiftc`). Everything is in one file, `snow.swift` — no dependencies.
 
-`XmasSnow.app/Contents/MacOS/snowfall --stage` plays the demo shown above (it paints a solid night-sky background so nothing behind it gets recorded).
+`XmasSnow.app/Contents/MacOS/snowfall --stage` plays the demo shown above (it paints a solid night-sky background so nothing behind it gets recorded). `--stage-desk <image>` plays the second one on top of a picture of your choice, with the snow height at 1/8.
 
 ## How it works
 
