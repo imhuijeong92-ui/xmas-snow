@@ -1139,7 +1139,7 @@ final class PileWindow: NSPanel {
 // ── 메뉴에서 바로 업데이트 ──────────────
 // 깃허브 최신 릴리스(태그 vX.Y.Z)가 이 버전보다 높으면 ❄︎ 메뉴 맨 위에 'Update to …' 가 뜬다.
 // ⚠ 릴리스를 낼 때마다 이 값과 태그를 같이 올릴 것 (같은 태그에 파일만 바꾸면 업데이트로 안 잡힌다)
-let appVersion = "1.2.0"
+let appVersion = "1.2.1"
 // 확인용: XMASSNOW_FEED 로 가짜 릴리스 정보를 줄 수 있다 (그때는 그 주소에서 받는 것도 허용)
 let testFeed = ProcessInfo.processInfo.environment["XMASSNOW_FEED"]
 let releaseFeed = URL(string: testFeed ?? "https://api.github.com/repos/imhuijeong92-ui/xmas-snow/releases/latest")!
@@ -1169,7 +1169,7 @@ let deerStories: [[String]] = [
     ["I keep one snowflake from every Christmas.", "This year's is going to be yours. ❄️"],
     ["Santa reads every letter twice.", "Once for the wish.", "Once for the person who wrote it. 💌"],
 ]
-// ⌥ Option 을 누른 채 ❄︎ 메뉴를 열면 보이는 'A little story' — 고를 때마다 다음 이야기
+// ❄︎ 메뉴의 'A little story' — 고를 때마다 다음 이야기 (처음 켰을 때 한 번은 저절로 뜬다)
 let littleStories: [(title: String, text: String)] = [
     ("The Smallest Snowflake", "The smallest snowflake was scared to fall.\n\"What if no one ever sees me?\"\n\nIt took a deep breath and let go…\nand landed right on your screen.\n\nYou saw it. ✨"),
     ("The Snowman's Scarf", "A snowman saw a little penguin shivering in the wind.\nHe took off his red scarf and wrapped it around her.\n\n\"Won't you be cold?\" asked the penguin.\n\"I'm a snowman,\" he laughed.\n\"But my heart feels warm now.\" 🧣"),
@@ -1275,7 +1275,7 @@ func run(_ tool: String, _ args: [String]) -> Bool {
     return p.terminationStatus == 0
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     var windows: [SnowWindow] = []
     var piles: [PileWindow] = []
     var amountFactor: CGFloat { [0.25, 1, 2][amount.rawValue] }
@@ -1305,6 +1305,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         scheduleSanta(first: true)
         scheduleVisitor(first: true)
         scheduleStar(first: true)
+        // 처음 켰을 때(새 버전으로 처음 켜졌을 때 포함) 한 번만 짧은 동화를 보여 준다 — 메뉴에 이야기책이 있다는 걸 알게
+        if UserDefaults.standard.string(forKey: "storyShownVersion") != appVersion {
+            UserDefaults.standard.set(appVersion, forKey: "storyShownVersion")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.tellStory(hint: true) }
+        }
         // 새 버전 확인 = 켜고 1분 뒤, 그 뒤로 12시간마다 (깃허브에 버전만 묻는다)
         DispatchQueue.main.asyncAfter(deadline: .now() + 60) { self.checkForUpdate() }
         updateTimer = Timer.scheduledTimer(withTimeInterval: 12 * 3600, repeats: true) { [weak self] _ in self?.checkForUpdate() }
@@ -1529,18 +1534,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                        item("Shooting star 🌠", #selector(callStar)),
                                        item("Snowplow 🚜", #selector(callPlow))]))
         m.addItem(.separator())
-        // 이스터에그: ⌥ Option 을 누른 채 열 때만 보인다 (menuWillOpen)
-        storyItem = item("📖 A little story", #selector(showStory))
-        storyItem?.isHidden = true
-        m.addItem(storyItem!)
+        m.addItem(item("📖 A little story", #selector(showStory)))  // 고를 때마다 다음 짧은 동화
         m.addItem(item("Check for updates… (v\(appVersion))", #selector(checkNow)))
         let quit = NSMenuItem(title: "Stop snow (Quit)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         m.addItem(quit)
-        m.delegate = self
         status.menu = m
     }
 
-    var storyItem: NSMenuItem?
 
     // ── 업데이트 ──
     var update: (version: String, url: URL)?
@@ -1644,15 +1644,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }.resume()
     }
 
-    func menuWillOpen(_ menu: NSMenu) {
-        storyItem?.isHidden = !NSEvent.modifierFlags.contains(.option)
-    }
 
-    @objc func showStory() {
+    @objc func showStory() { tellStory(hint: false) }
+
+    func tellStory(hint: Bool) {
         let s = littleStories[nextIndex("littleStory", count: littleStories.count)]
         let a = NSAlert()
         a.messageText = s.title
-        a.informativeText = s.text
+        a.informativeText = s.text + (hint ? "\n\n📖 More stories: ❄︎ menu → A little story" : "")
         a.icon = NSImage(cgImage: peekDeer, size: NSSize(width: peekDeer.width * 4, height: peekDeer.height * 4))
         a.addButton(withTitle: "Merry Christmas 🎄")
         NSApp.activate(ignoringOtherApps: true)

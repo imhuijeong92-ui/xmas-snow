@@ -135,7 +135,7 @@ static class Art
 // ⚠ 릴리스를 낼 때마다 이 값과 태그를 같이 올릴 것 (같은 태그에 파일만 바꾸면 업데이트로 안 잡힌다)
 static class Updater
 {
-    public const string Version = "1.2.0";
+    public const string Version = "1.2.1";
     const string Feed = "https://api.github.com/repos/imhuijeong92-ui/xmas-snow/releases/latest";
     public const string Page = "https://github.com/imhuijeong92-ui/xmas-snow/releases/latest";
     const string RepoPath = "/imhuijeong92-ui/xmas-snow/releases/download/";
@@ -266,7 +266,7 @@ static class Story
         new string[] { "I keep one snowflake from every Christmas.", "This year's is going to be yours. ❄️" },
         new string[] { "Santa reads every letter twice.", "Once for the wish.", "Once for the person who wrote it. 💌" },
     };
-    // Shift 를 누른 채 ❄ 메뉴를 열면 보이는 'A little story' — 고를 때마다 다음 이야기
+    // ❄ 메뉴의 'A little story' — 고를 때마다 다음 이야기 (처음 켰을 때 한 번은 저절로 뜬다)
     public static readonly string[] LittleTitle = { "The Smallest Snowflake", "The Snowman's Scarf", "Santa's Last Cookie" };
     public static readonly string[] LittleText = {
         "The smallest snowflake was scared to fall.\n\"What if no one ever sees me?\"\n\nIt took a deep breath and let go…\nand landed right on your screen.\n\nYou saw it. ✨",
@@ -1311,6 +1311,14 @@ class Controller
     bool santaOn, snowmanOn, penguinOn, starOn, pileOn;
     readonly System.Windows.Forms.Timer starTimer = new System.Windows.Forms.Timer();
     readonly System.Windows.Forms.Timer updateTimer = new System.Windows.Forms.Timer();
+    readonly System.Windows.Forms.Timer storyTimer = new System.Windows.Forms.Timer();
+
+    void TellStory(bool hint)
+    {
+        int i = Story.Next("littleStory", Story.LittleTitle.Length);
+        string text = Story.LittleText[i] + (hint ? "\n\n📖 More stories: right-click ❄ in the tray → A little story" : "");
+        MessageBox.Show(text, Story.LittleTitle[i], MessageBoxButtons.OK, MessageBoxIcon.None);
+    }
     bool manualCheck, updating;
     volatile int installResult;  // 설치 스레드 결과: 1 = 준비됨, -1 = 실패
 
@@ -1407,6 +1415,17 @@ class Controller
         };
         visitorTimer.Interval = 60000;
         visitorTimer.Start();
+        // 처음 켰을 때(새 버전으로 처음 켜졌을 때 포함) 한 번만 짧은 동화를 보여 준다 — 메뉴에 이야기책이 있다는 걸 알게
+        using (RegistryKey sk = Registry.CurrentUser.CreateSubKey(RegPath))
+        {
+            if ((sk.GetValue("storyShownVersion") as string) != Updater.Version)
+            {
+                sk.SetValue("storyShownVersion", Updater.Version);
+                storyTimer.Interval = 5000;
+                storyTimer.Tick += delegate { storyTimer.Stop(); TellStory(true); };
+                storyTimer.Start();
+            }
+        }
         // 새 버전 확인 = 켜고 1분 뒤, 그 뒤로 12시간마다 (깃허브에 버전만 묻는다)
         updateTimer.Tick += delegate { updateTimer.Interval = 12 * 3600 * 1000; Updater.CheckAsync(); };
         updateTimer.Interval = 60000;
@@ -1584,15 +1603,7 @@ class Controller
         m.Items.Add(call);
 
         m.Items.Add(new ToolStripSeparator());
-        // 이스터에그: Shift 를 누른 채 ❄ 아이콘을 오른쪽 클릭할 때만 보인다
-        ToolStripMenuItem story = Item("📖 A little story", false, delegate
-        {
-            int i = Story.Next("littleStory", Story.LittleTitle.Length);
-            MessageBox.Show(Story.LittleText[i], Story.LittleTitle[i], MessageBoxButtons.OK, MessageBoxIcon.None);
-        });
-        story.Visible = false;
-        m.Items.Add(story);
-        m.Opening += delegate { story.Visible = (Control.ModifierKeys & Keys.Shift) != 0; };
+        m.Items.Add(Item("📖 A little story", false, delegate { TellStory(false); }));  // 고를 때마다 다음 짧은 동화
         m.Items.Add(Item("Check for updates… (v" + Updater.Version + ")", false, delegate { manualCheck = true; Updater.CheckAsync(); }));
         m.Items.Add(Item("Stop snow (Quit)", false, delegate { tray.Visible = false; Application.Exit(); }));
         tray.ContextMenuStrip = m;
