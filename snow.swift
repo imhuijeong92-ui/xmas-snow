@@ -88,7 +88,7 @@ final class SnowWindow: NSPanel {
         hasShadow = false
         ignoresMouseEvents = true
         isReleasedWhenClosed = false
-        level = .statusBar
+        level = stageMode ? .screenSaver : .statusBar  // 녹화 때는 다른 앱·펫이 안 찍히게 맨 위
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
 
         let view = ClickView(frame: NSRect(origin: .zero, size: band.size))
@@ -771,7 +771,8 @@ final class PileWindow: NSPanel {
         hasShadow = false
         ignoresMouseEvents = true
         isReleasedWhenClosed = false
-        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)) - 1)
+        level = stageMode ? NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
+                          : NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)) - 1)
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
 
         let view = ClickView(frame: NSRect(origin: .zero, size: rect.size))
@@ -786,7 +787,7 @@ final class PileWindow: NSPanel {
         front.hasShadow = false
         front.ignoresMouseEvents = true
         front.isReleasedWhenClosed = false
-        front.level = .statusBar
+        front.level = stageMode ? NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 2) : .statusBar
         front.collectionBehavior = collectionBehavior
         let fv = ClickView(frame: NSRect(origin: .zero, size: rect.size))
         fv.wantsLayer = true
@@ -796,7 +797,7 @@ final class PileWindow: NSPanel {
 
         let cols = Int(ceil(rect.width / pilePx))
         heights = Array(repeating: 0, count: cols)
-        let saved = UserDefaults.standard.dictionary(forKey: saveKey)
+        let saved = stageMode ? nil : UserDefaults.standard.dictionary(forKey: saveKey)
         // 큰 둔덕 + 작은 굴곡 + 동글한 혹을 겹친 물결 (모니터마다 모양이 다르다)
         let savedPh = (saved?["ph"] as? [Double])?.map { CGFloat($0) }
         ph = savedPh?.count == 4 ? savedPh! : (0..<4).map { _ in CGFloat.random(in: 0..<(2 * .pi)) }
@@ -839,6 +840,7 @@ final class PileWindow: NSPanel {
     }
 
     func save() {
+        guard !stageMode else { return }  // 녹화용 눈 더미가 진짜 쌓인 눈을 덮어쓰지 않게
         UserDefaults.standard.set(["h": heights, "ph": ph.map { Double($0) }], forKey: saveKey)
     }
 
@@ -1288,7 +1290,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         status.button?.title = "❄︎"
         buildMenu()
-        if stageMode { bandIndex = 3; santaSpeedIndex = 2; amount = .normal }
+        if stageMode { bandIndex = 4; santaSpeedIndex = 2; amount = .normal }
         rebuild()
         if stageMode { stage(); return }
         NotificationCenter.default.addObserver(self, selector: #selector(rebuild),
@@ -1334,15 +1336,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let w = windows.first else { return }
         func at(_ t: Double, _ f: @escaping () -> Void) { DispatchQueue.main.asyncAfter(deadline: .now() + t, execute: f) }
         w.treatDebt = 4
-        at(1.0) { w.flySanta() }
-        at(3.2) { w.actors.filter { $0.name == "santa" }.forEach { w.showBubble(on: $0); w.dropGifts(from: $0) } }
+        // 쌓인 눈은 처음부터 가득 (루돌프는 장면에 맞춰 부른다)
+        if let p = piles.first { p.lastPeek = Date(); p.carry = 9000; p.grow(0) }
+        at(1.0) { w.flySanta(talk: true) }   // 산타 디데이
         at(0.3) { w.walk("snowman") }
+        at(4.6) { w.actors.filter { $0.name == "snowman" }.forEach { w.showBubble(on: $0); w.dropGifts(from: $0) } }
         at(4.0) { w.walk("penguin") }
         at(6.0) { w.shootStar(fromX: 120, rightward: true) }
         at(7.0) { w.actors.filter { $0.name == "shootingStar" }.forEach { w.catchStar($0) } }
         at(7.6) { w.actors.filter { $0.name == "penguin" }.forEach { w.showBubble(on: $0) } }
         for (i, t) in [5.0, 8.4, 9.3].enumerated() {
             at(t) { if let x = w.treatLive.dropFirst(i % 2).first { w.pop(x) } }
+        }
+        // 루돌프가 빼꼼 → 루돌프를 누르면 퐁 → 산타 제설차가 쌓인 눈을 치운다
+        if let p = piles.first {
+            at(9.0) { p.peek() }
+            at(11.5) {
+                if let d = p.deer { p.puff(at: (d.presentation() ?? d).position) }
+                p.hideDeer()
+                p.sendPlow()
+            }
         }
     }
 
@@ -1639,7 +1652,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         windows = NSScreen.screens.map { SnowWindow(screen: $0, amount: amount) }
         windows.forEach { $0.orderFrontRegardless() }
         piles.forEach { $0.stop(); $0.orderOut(nil) }
-        piles = pileOn && !stageMode ? NSScreen.screens.map { PileWindow(screen: $0, amountFactor: amountFactor) } : []
+        piles = stageMode ? [PileWindow(screen: NSScreen.screens[0], amountFactor: amountFactor)]
+              : pileOn ? NSScreen.screens.map { PileWindow(screen: $0, amountFactor: amountFactor) } : []
         piles.forEach { $0.show() }
     }
 
