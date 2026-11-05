@@ -740,8 +740,10 @@ final class PileWindow: NSPanel {
     var lastPeek: Date?
     var growTimer: Timer?
     var hoverTimer: Timer?
-    var dockUp = false             // 커서가 화면 아래 끝에 닿아 독이 올라온 상태 — 이때 독 높이 안의 클릭은 독 몫
+    var dockUp = false             // 커서가 화면 아래 끝에 닿아 독이 올라온 상태 — 이때 독 자리 안의 클릭은 독 몫
     let dockBand: CGFloat
+    let dockIcon: CGFloat
+    var dockHalf: CGFloat = 0      // 올라온 독의 가로 반폭(가운데 기준) — 독 양옆에 쌓인 눈은 그대로 누를 수 있게
     // 쌓인 높이·물결 모양을 화면마다 저장 → 앱을 다시 켜거나 화면이 바뀌어도 이어서 쌓인다
     let saveKey: String
     var ph: [CGFloat] = []
@@ -766,6 +768,7 @@ final class PileWindow: NSPanel {
         let tile = CGFloat(dock?.object(forKey: "tilesize") as? Double ?? 48)
         let big = dock?.bool(forKey: "magnification") == true ? CGFloat(dock?.object(forKey: "largesize") as? Double ?? 64) : 0
         dockBand = side ? 0 : max(tile, big) + 28
+        dockIcon = max(tile, big)
         let display = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
         saveKey = "pile-\(display)"
         super.init(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -837,7 +840,7 @@ final class PileWindow: NSPanel {
             let p = CGPoint(x: m.x - self.frame.minX, y: m.y - self.frame.minY)
             // 독처럼 판단: 아래 끝에 닿으면 독이 올라오고, 독 높이 위로 벗어나거나 다른 화면으로 가면 내려간다
             let here = p.x >= 0 && p.x < self.frame.width
-            if here && p.y <= 1 && self.dockBand > 0 { self.dockUp = true }
+            if here && p.y <= 1 && self.dockBand > 0 && !self.dockUp { self.dockUp = true; self.dockHalf = self.dockWidth() / 2 }
             if !here || p.y > self.dockBand { self.dockUp = false }
             self.front.ignoresMouseEvents = !self.onDeer(p)
             self.ignoresMouseEvents = !self.onPile(p)
@@ -866,9 +869,24 @@ final class PileWindow: NSPanel {
         front.orderFrontRegardless()
     }
 
+    // 독 너비 어림 = (고정 앱 + 고정 안 된 실행 중 앱 + 폴더·휴지통) × 아이콘 + 구분선·여백. 넉넉히 잡되 화면 전체를 막지는 않는다
+    func dockWidth() -> CGFloat {
+        let dock = UserDefaults(suiteName: "com.apple.dock")
+        let apps = dock?.array(forKey: "persistent-apps") as? [[String: Any]] ?? []
+        let pinned = Set(apps.compactMap { ($0["tile-data"] as? [String: Any])?["bundle-identifier"] as? String })
+        let running = NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular && !pinned.contains($0.bundleIdentifier ?? "")
+        }.count
+        let recents = dock?.object(forKey: "show-recents") as? Bool ?? true ? 3 : 0
+        let others = dock?.array(forKey: "persistent-others")?.count ?? 0
+        let items = CGFloat(apps.count + running + recents + others + 1)
+        return items * dockIcon + 2 * 14 + 2 * dockIcon
+    }
+
     func onPile(_ p: CGPoint) -> Bool {
         let i = Int(p.x / pilePx)
-        guard plow == nil, i >= 0, i < heights.count, heights[i] >= 3, !(dockUp && p.y <= dockBand) else { return false }
+        let underDock = dockUp && p.y <= dockBand && abs(p.x - frame.width / 2) <= dockHalf
+        guard plow == nil, i >= 0, i < heights.count, heights[i] >= 3, !underDock else { return false }
         return p.y >= 0 && p.y <= CGFloat(heights[i]) * pilePx + 6
     }
 
@@ -1139,7 +1157,7 @@ final class PileWindow: NSPanel {
 // ── 메뉴에서 바로 업데이트 ──────────────
 // 깃허브 최신 릴리스(태그 vX.Y.Z)가 이 버전보다 높으면 ❄︎ 메뉴 맨 위에 'Update to …' 가 뜬다.
 // ⚠ 릴리스를 낼 때마다 이 값과 태그를 같이 올릴 것 (같은 태그에 파일만 바꾸면 업데이트로 안 잡힌다)
-let appVersion = "1.2.1"
+let appVersion = "1.2.2"
 // 확인용: XMASSNOW_FEED 로 가짜 릴리스 정보를 줄 수 있다 (그때는 그 주소에서 받는 것도 허용)
 let testFeed = ProcessInfo.processInfo.environment["XMASSNOW_FEED"]
 let releaseFeed = URL(string: testFeed ?? "https://api.github.com/repos/imhuijeong92-ui/xmas-snow/releases/latest")!

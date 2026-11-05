@@ -135,7 +135,7 @@ static class Art
 // ⚠ 릴리스를 낼 때마다 이 값과 태그를 같이 올릴 것 (같은 태그에 파일만 바꾸면 업데이트로 안 잡힌다)
 static class Updater
 {
-    public const string Version = "1.2.1";
+    public const string Version = "1.2.2";
     const string Feed = "https://api.github.com/repos/imhuijeong92-ui/xmas-snow/releases/latest";
     public const string Page = "https://github.com/imhuijeong92-ui/xmas-snow/releases/latest";
     const string RepoPath = "/imhuijeong92-ui/xmas-snow/releases/download/";
