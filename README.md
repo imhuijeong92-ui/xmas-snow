@@ -88,6 +88,10 @@ Requires the Xcode command line tools (`swiftc`). Everything is in one file, `sn
 
 Code comments are in Korean. Issues and PRs in any language are welcome.
 
+## Also
+
+Use the [Clawd on Desk](https://github.com/rullerzhou-afk/clawd-on-desk) desktop pet? There are matching Christmas pixel themes — a snowman, Rudolph, gingerbread and a tree — in [Xmas Clawd Themes](https://github.com/imhuijeong92-ui/xmas-clawd-themes) 🎄
+
 ## License
 
 [MIT](LICENSE)
