@@ -63,8 +63,46 @@ let flakeImages = [flakeImage(flakeDot), flakeImage(flakeMid), flakeImage(flakeB
 // 산타 위에서만 클릭을 받는 뷰 — 앱을 앞으로 끌어오지 않고 첫 클릭부터 받는다
 final class ClickView: NSView {
     var onClick: (CGPoint) -> Void = { _ in }
+    // 길게 누르기를 받는 뷰(쌓인 눈)는 손을 뗄 때 클릭으로 친다. 0.55초 누르고 있으면 onHold — true 면 클릭은 없던 걸로.
+    // 그 뒤 손을 떼거나 끌어서 벗어나면 onHoldEnd (눈사람은 누르는 동안 자라다가 이때 멈춘다)
+    var onHold: ((CGPoint) -> Bool)?
+    var onHoldEnd: (() -> Void)?
+    private var downAt: CGPoint?
+    var isPressed: Bool { downAt != nil }
+    private var holdTimer: Timer?
+    private var held = false       // onHold 가 받아 줬다 → 손 뗄 때 클릭 아님
+    private var holding = false    // 아직 onHoldEnd 를 안 불렀다
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) { onClick(convert(event.locationInWindow, from: nil)) }
+    private func endHold() {
+        guard holding else { return }
+        holding = false
+        onHoldEnd?()
+    }
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        guard let hold = onHold else { onClick(p); return }
+        downAt = p
+        held = false
+        holding = false
+        holdTimer?.invalidate()
+        holdTimer = Timer.scheduledTimer(withTimeInterval: 0.55, repeats: false) { [weak self] _ in
+            guard let self = self, let d = self.downAt else { return }
+            self.held = hold(d)
+            self.holding = self.held
+        }
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard let d = downAt else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        if hypot(p.x - d.x, p.y - d.y) > 6 { holdTimer?.invalidate(); downAt = nil; endHold() }
+    }
+    override func mouseUp(with event: NSEvent) {
+        guard onHold != nil else { return }
+        holdTimer?.invalidate()
+        let p = downAt
+        downAt = nil
+        if held { endHold() } else if let p = p { onClick(p) }
+    }
 }
 
 // 평소엔 클릭이 통과하고, 산타가 커서 아래 있을 때만 클릭을 받는다. 포커스는 안 뺏는다.
@@ -79,6 +117,8 @@ final class SnowWindow: NSPanel {
     var treatLive: [CALayer] = []  // 지금 떨어지는 간식·장식 (클릭하면 터진다)
     var bubble: CALayer?
     var hoverTimer: Timer?
+    var paused = false             // 메뉴 Hide for… 로 잠깐 숨기면 멈춘다
+    var displayID: UInt32 = 0
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -113,6 +153,8 @@ final class SnowWindow: NSPanel {
         snow.mask = fade
         view.layer?.addSublayer(snow)
         apply(amount, width: band.width)
+        displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+        if lightsOn && !recording { addLights(screen) }
 
         spawnTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.spawn(0.1) }
         // 평소엔 클릭이 통과하고, 커서가 산타·눈사람·펭귄·간식 위에 있을 때만 클릭을 받는다
@@ -120,8 +162,14 @@ final class SnowWindow: NSPanel {
             guard let self = self else { return }
             let m = NSEvent.mouseLocation
             let p = CGPoint(x: m.x - self.frame.minX, y: m.y - self.frame.minY)
-            self.ignoresMouseEvents = self.actorAt(p) == nil && self.treatAt(p) == nil
+            self.ignoresMouseEvents = self.paused || (self.actorAt(p) == nil && self.treatAt(p) == nil)
         }
+    }
+
+    func setPaused(_ on: Bool, animated: Bool = true) {
+        guard on != paused else { return }
+        paused = on
+        NSAnimationContext.runAnimationGroup { c in c.duration = animated ? 0.4 : 0; animator().alphaValue = on ? 0 : 1 }
     }
 
     func apply(_ amount: Amount, width: CGFloat) {
@@ -134,6 +182,7 @@ final class SnowWindow: NSPanel {
     }
 
     func spawn(_ dt: CGFloat) {
+        guard !paused else { return }
         debt += rate * dt
         let cap = 1500  // 펑펑 + 화면 전체에서도 너무 무거워지지 않게
         while debt >= 1 {
@@ -145,7 +194,10 @@ final class SnowWindow: NSPanel {
         if treatDebt >= 1 {
             treatDebt -= CGFloat.random(in: 0.6...1.4)
             let on = treatGroups.indices.filter { !treatsOff.contains($0) }
-            if let gi = on.randomElement() {
+            // 아주 가끔(약 600번에 한 번) 황금 눈송이 — 잡으면 Rare finds 에 모인다
+            if Int.random(in: 0..<600) == 0 {
+                addFaller(goldenFlake, px: 2.5, speed: 30, twinkle: true, group: -1)
+            } else if let gi = on.randomElement() {
                 let g = treatGroups[gi]
                 addFaller(g.imgs.randomElement()!, px: 2.5, speed: CGFloat.random(in: 28...40), tilt: true, twinkle: g.twinkle, group: gi)
             }
@@ -197,7 +249,7 @@ final class SnowWindow: NSPanel {
             self?.treatLive.removeAll { $0 === flake }
         }
         if let g = group {
-            flake.name = "treat\(g)"
+            flake.name = g < 0 ? "golden" : "treat\(g)"
             treatLive.append(flake)
         }
         snow.addSublayer(flake)
@@ -225,6 +277,7 @@ let spritePalette: [Character: (CGFloat, CGFloat, CGFloat)] = [
     "K": (0.17, 0.17, 0.17), "Y": (0.95, 0.76, 0.31), "y": (0.72, 0.56, 0.16), "B": (0.61, 0.40, 0.27),
     "b": (0.42, 0.26, 0.15), "N": (0.90, 0.22, 0.27), "T": (0.85, 0.70, 0.55), "G": (0.18, 0.62, 0.36),
     "L": (0.30, 0.52, 0.86), "O": (0.98, 0.60, 0.15), "g": (0.10, 0.42, 0.24),
+    "S": (0.72, 0.80, 0.90),   // 흰 털 그늘 (북극곰·북극여우가 밝은 창 위에서도 보이게)
 ]
 let sleigh = [
     "...W.RR.........",
@@ -318,7 +371,8 @@ extension String {
 }
 
 // ── 가끔 지나가는 친구들 ──────────────
-let snowmanSprite = spriteImage(["....KKKK....", "....KKKK....", "...KKKKKK...", "...WWWWWW...", "..WWKWWKWW..", "..WOOOWWWW..", "...WWWWWW...", "..RRRRRRRR..", "B.RWWWWWWW.B", ".BWWWKWWWWB.", "..WWWWWWWW..", ".WWWWKWWWWW.", ".WWWWWWWWWW.", "..WWWWWWWW.."])
+let snowmanRows = ["....KKKK....", "....KKKK....", "...KKKKKK...", "...WWWWWW...", "..WWKWWKWW..", "..WOOOWWWW..", "...WWWWWW...", "..RRRRRRRR..", "B.RWWWWWWW.B", ".BWWWKWWWWB.", "..WWWWWWWW..", ".WWWWKWWWWW.", ".WWWWWWWWWW.", "..WWWWWWWW.."]
+let snowmanSprite = spriteImage(snowmanRows)
 let penguinSprite = spriteImage(["..........KKK..", ".........KKKKK.", "...KKKKKKKKWKKO", "..KKKKKKKKRRKOO", ".KKWWWWWWWRRKK.", "OKWWWWWWWWWWK..", "O.WWWWWWWWWW..."])
 
 let shootingStarSprite = spriteImage(["...W...", "..WYW..", ".WYYYW.", "WYYYYYW", ".WYYYW.", "..WYW..", "...W..."])
@@ -458,6 +512,7 @@ extension SnowWindow {
     func flySanta(talk: Bool = false, then done: @escaping () -> Void = {}) {
         guard let root = contentView?.layer else { done(); return }
         let px: CGFloat = 3
+        let santaSprite = monthDay() == (12, 24) ? santaTeamSprite : santaSprite   // 크리스마스이브엔 순록 셋이 끈다
         let size = CGSize(width: CGFloat(santaSprite.width) * px, height: CGFloat(santaSprite.height) * px)
         let w = root.bounds.width, h = root.bounds.height
         let y = h * CGFloat.random(in: 0.45...0.7)
@@ -571,7 +626,9 @@ extension SnowWindow {
 
     func clicked(at p: CGPoint) {
         if let a = actorAt(p), a.name == "shootingStar" { catchStar(a) }
+        else if let a = actorAt(p), let id = a.name, id.hasPrefix("rare-") { catchRare(a, id: String(id.dropFirst(5))) }
         else if let a = actorAt(p) { showBubble(on: a); dropGifts(from: a) }
+        else if let t = treatAt(p), t.name == "golden" { catchGolden(t) }
         else if let t = treatAt(p) { pop(t) }
     }
 
@@ -681,6 +738,301 @@ extension SnowWindow {
     }
 }
 
+// ── 1.3: 전구 줄 · 잠깐 숨기기 · 어드벤트 캘린더 · 특별한 날 · 드문 손님 · 눈사람 만들기 ──────────────
+var lightsOn = UserDefaults.standard.object(forKey: "lights") as? Bool ?? true
+// 메뉴 'Hide for…' 로 30분·1시간 숨긴다 — 앱을 다시 켜도 그 시각까지는 숨긴 채로
+var hideUntil: Date? = (UserDefaults.standard.object(forKey: "hideUntil") as? Double).map { Date(timeIntervalSince1970: $0) }
+
+// 시험용: XMASSNOW_DATE="2026-12-24 19:00" 으로 켜면 그 시각부터 시간이 흐르는 것처럼 동작한다
+let launchedAt = Date()
+let fakeStart: Date? = ProcessInfo.processInfo.environment["XMASSNOW_DATE"].flatMap { s in
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd HH:mm"
+    return f.date(from: s)
+}
+let store = fakeStart == nil ? UserDefaults.standard : UserDefaults(suiteName: "io.github.imhuijeong92-ui.xmas-snow.test")!
+func appNow() -> Date { fakeStart.map { $0.addingTimeInterval(Date().timeIntervalSince(launchedAt)) } ?? Date() }
+func monthDay(_ d: Date = appNow()) -> (Int, Int) {
+    let c = Calendar.current.dateComponents([.month, .day], from: d)
+    return (c.month ?? 0, c.day ?? 0)
+}
+
+// 메뉴 막대 아래 전구: 줄이 늘어진 곡선마다 전구 3개, 색은 빨·금·파·초·주황 차례
+let bulbColors: [Character] = ["R", "Y", "L", "G", "O"]
+let bulbSprites = bulbColors.map { c in
+    spriteImage([".g.", "XXX", "XXX", ".X."].map { $0.replacingOccurrences(of: "X", with: String(c)) }, outline: false)
+}
+
+// 크리스마스이브 산타 = 썰매 + 순록 셋
+let santaTeamSprite: CGImage = spriteImage((0..<sleigh.count).map { i -> String in
+    let deer: String = reins[i] + reindeer[i]
+    return sleigh[i] + deer + deer + deer
+})
+
+// 드문 손님 — 만나서 누르면 ❄︎ 메뉴 Rare finds 에 모인다
+let rareFinds: [(id: String, name: String, a: String, emoji: String)] = [
+    ("golden", "Golden snowflake", "a golden snowflake", "✨"),
+    ("bear", "Polar bear", "a polar bear", "🐻‍❄️"),
+    ("owl", "Little owl", "a little owl", "🦉"),
+    ("fox", "Arctic fox", "an Arctic fox", "🦊"),
+    ("elf", "Little elf", "a little elf", "🧝"),
+    // 특별한 눈사람 — 꾹 눌러 3단까지 키우면 가끔 나온다
+    ("man-santa", "Santa snowman", "a snowman in a Santa hat", "🎅"),
+    ("man-cat", "Kitty snowman", "a kitty snowman", "🐱"),
+    ("man-gold", "Golden snowman", "a golden snowman", "🌟"),
+]
+var collected = Set(store.stringArray(forKey: "collected") ?? [])
+let collectedChanged = Notification.Name("collectedChanged")
+
+// 처음 찾으면 "You found …! (2/5)", 이미 찾은 거면 "… again!"
+func collect(_ id: String) -> String {
+    guard let r = rareFinds.first(where: { $0.id == id }) else { return "Merry Christmas! 🎄" }
+    guard collected.insert(id).inserted else { return "\(r.name) again! \(r.emoji)" }
+    store.set(Array(collected), forKey: "collected")
+    NotificationCenter.default.post(name: collectedChanged, object: nil)
+    return "You found \(r.a)! \(r.emoji) (\(collected.count)/\(rareFinds.count))"
+}
+
+let goldenFlake = spriteImage(flakeBig.map { $0.replacingOccurrences(of: "X", with: "Y") })
+let polarBearSprite = spriteImage([
+    "...........WW.W.",
+    "..........WWWWW.",
+    "..WWWWWWWWWWKWWK",
+    ".WWWWWWWWWWWWWW.",
+    "WWWWWWWWWWWWS...",
+    ".SWWWWWWWWWWS...",
+    ".SS.SS...SS.SS..",
+    ".SS.SS...SS.SS..",
+])
+let owlSprite = spriteImage([
+    ".B.....B.",
+    ".BBBBBBB.",
+    "BWWBBBWWB",
+    "BWKBYBKWB",
+    "BWWBYBWWB",
+    ".BBTTTBB.",
+    ".BTTBTTB.",
+    ".BBTTTBB.",
+    "..BB.BB..",
+    "..Y...Y..",
+])
+let foxSprite = spriteImage([
+    "W.W.............",
+    "WWWW............",
+    "WKWWW...........",
+    "KWWWWWWWWWWW..WW",
+    "..WWWWWWWWWWWWWS",
+    "..SWWWWWWWWWS.SS",
+    "..S.S....S.S....",
+    "..S.S....S.S....",
+])
+let elfSprite = spriteImage([
+    "......Y..",
+    ".....GG..",
+    "....GGG..",
+    "..GGGGG..",
+    ".GGGGGGG.",
+    ".WWWWWWW.",
+    ".FFFFFFF.",
+    ".FKFFFKF.",
+    ".FFFRFFF.",
+    "..GGGGG..",
+    "FGGGYGGGF",
+    "..GGGGG..",
+    "..R...R..",
+    "..RR..RR.",
+])
+
+// 어드벤트 캘린더 12/1–12/25: 하루에 하나씩 짧은 말 + 작은 선물
+let adventDays: [(text: String, gift: String)] = [
+    ("The first door is open! 24 more little surprises to go. 🎄", "santa"),
+    ("A snowman is coming over to say hello. ⛄", "snowman"),
+    ("Today's treat: a sweet shower of candy canes and cookies. 🍬", "treats"),
+    ("Make a wish — a shooting star is on its way. 🌠", "star"),
+    ("Penguin says: slide into the weekend… or at least into tea time. 🐧", "penguin"),
+    ("Someone rare is wandering by today. Keep an eye out! ⭐", "rare"),
+    ("Hot cocoa rule: one marshmallow for you, one for a friend. ☕", "gifts"),
+    ("Rudolph polished his nose just for you. ❤️", "santa"),
+    ("Press and hold on the snow pile — you might build a friend. ⛄", "snowman"),
+    ("Ten days in! Here's a little gift rain. 🎁", "gifts"),
+    ("Even the smallest snowflake makes the world a bit softer. ❄️", "star"),
+    ("A rare visitor heard you've been kind this year. ⭐", "rare"),
+    ("Penguin practice day: belly slides only. 🐧", "penguin"),
+    ("Two weeks of surprises! Santa is doing a test flight. 🎅", "santa"),
+    ("Take a deep breath. You're doing great. 🌟", "treats"),
+    ("Snowman found a new scarf and wants to show it off. 🧣", "snowman"),
+    ("Shooting star delivery — wish carefully! 🌠", "star"),
+    ("Someone fluffy is out exploring today. ⭐", "rare"),
+    ("Treat yourself: cookies are falling from the sky. 🍪", "treats"),
+    ("Five more doors! The elves are working overtime. 🎁", "gifts"),
+    ("The longest night of the year — perfect for twinkling lights. 💡", "star"),
+    ("Santa's sleigh is getting a last-minute polish. 🛷", "santa"),
+    ("Another rare friend is passing by. Can you catch them? ⭐", "rare"),
+    ("It's Christmas Eve! Santa brings the whole team tonight. 🎅", "santa"),
+    ("Merry Christmas! Look at the bottom of your screen… 🎁", "xmas"),
+]
+
+extension SnowWindow {
+    // 메뉴 막대 바로 아래로 늘어진 전구 줄. 전구마다 제각각 깜빡인다
+    func addLights(_ scr: NSScreen) {
+        guard let root = contentView?.layer else { return }
+        let top = root.bounds.height - (scr.frame.maxY - scr.visibleFrame.maxY)
+        let w = root.bounds.width, span: CGFloat = 72, sag: CGFloat = 9, px: CGFloat = 2.5
+        let lights = CALayer()
+        lights.name = "lights"
+        lights.frame = root.bounds
+        let wire = CAShapeLayer()
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 0, y: top - 1))
+        var x: CGFloat = 0
+        while x < w {
+            path.addQuadCurve(to: CGPoint(x: x + span, y: top - 1), control: CGPoint(x: x + span / 2, y: top - 1 - sag * 2))
+            x += span
+        }
+        wire.path = path
+        wire.strokeColor = CGColor(red: 0.10, green: 0.42, blue: 0.24, alpha: 1)
+        wire.fillColor = nil
+        wire.lineWidth = 1.5
+        lights.addSublayer(wire)
+        var i = 0
+        x = 0
+        while x < w {
+            for t in [0.2, 0.5, 0.8] as [CGFloat] {
+                let k = i % bulbSprites.count
+                let img = bulbSprites[k]
+                let b = CALayer()
+                b.contents = img
+                b.magnificationFilter = .nearest
+                b.bounds = CGRect(x: 0, y: 0, width: CGFloat(img.width) * px, height: CGFloat(img.height) * px)
+                b.anchorPoint = CGPoint(x: 0.5, y: 1)
+                b.position = CGPoint(x: x + t * span, y: top - 1 - 4 * sag * t * (1 - t) + px)   // 곡선 위 점에 매단다
+                let c = spritePalette[bulbColors[k]]!
+                b.shadowColor = CGColor(red: c.0, green: c.1, blue: c.2, alpha: 1)
+                b.shadowOpacity = 0.9
+                b.shadowRadius = 5
+                b.shadowOffset = .zero
+                b.shadowPath = CGPath(ellipseIn: b.bounds.insetBy(dx: px, dy: px * 1.5), transform: nil)
+                let tw = CAKeyframeAnimation(keyPath: "opacity")
+                tw.values = [1, 1, 0.3, 1]
+                tw.keyTimes = [0, 0.55, 0.75, 1]
+                tw.duration = Double.random(in: 1.8...3.2)
+                tw.repeatCount = .infinity
+                tw.beginTime = CACurrentMediaTime() + Double.random(in: 0...3)
+                b.add(tw, forKey: "twinkle")
+                lights.addSublayer(b)
+                i += 1
+            }
+            x += span
+        }
+        root.addSublayer(lights)
+    }
+
+    // 드문 손님: 북극곰(왼→오 느릿느릿) · 부엉이(날아서) · 북극여우(오→왼 깡충) · 꼬마 요정(왼→오 통통)
+    func wander(_ id: String) {
+        guard let root = contentView?.layer else { return }
+        let img = ["bear": polarBearSprite, "owl": owlSprite, "fox": foxSprite, "elf": elfSprite][id] ?? elfSprite
+        let px: CGFloat = 3
+        let size = CGSize(width: CGFloat(img.width) * px, height: CGFloat(img.height) * px)
+        let w = root.bounds.width, h = root.bounds.height
+        let leftward = id == "fox"
+        let speed: CGFloat = ["bear": 60, "owl": 120, "fox": 140, "elf": 90][id] ?? 90
+        let base = id == "owl" ? h * CGFloat.random(in: 0.45...0.7) : max(size.height / 2 + 8, h * 0.12)
+        let duration = Double((w + size.width * 2) / speed)
+        let sprite = CALayer()
+        sprite.name = "rare-\(id)"
+        sprite.contents = img
+        sprite.magnificationFilter = .nearest
+        sprite.bounds = CGRect(origin: .zero, size: size)
+        sprite.position = CGPoint(x: leftward ? w + size.width : -size.width, y: base)
+        root.addSublayer(sprite)
+        let n = max(20, Int(duration * 20))
+        let path = (0...n).map { i -> NSValue in
+            let t = Double(i) / Double(n), sec = duration * t
+            let x = -size.width + CGFloat(t) * (w + size.width * 2)
+            let y: CGFloat
+            switch id {
+            case "owl": y = base + CGFloat(sin(sec * 4)) * 12
+            case "fox": y = base + abs(CGFloat(sin(.pi * sec * 2.5))) * 8
+            case "elf": y = base + abs(CGFloat(sin(.pi * sec * 2))) * 12
+            default: y = base + CGFloat(sin(sec * 6)) * 1.5
+            }
+            return NSValue(point: CGPoint(x: leftward ? w - x : x, y: y))
+        }
+        let move = CAKeyframeAnimation(keyPath: "position")
+        move.values = path; move.duration = duration; move.calculationMode = .linear
+        move.isRemovedOnCompletion = false; move.fillMode = .forwards
+        addActor(sprite)
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self] in
+            self?.removeActor(sprite)
+            sprite.removeFromSuperlayer()
+        }
+        sprite.add(move, forKey: "walk")
+        CATransaction.commit()
+    }
+
+    func catchRare(_ a: CALayer, id: String) {
+        let f = a.presentation()?.frame ?? a.frame
+        burst(at: CGPoint(x: f.midX, y: f.midY), colors: "YyWY")
+        showBubble(on: a, text: collect(id))
+    }
+
+    func catchGolden(_ t: CALayer) {
+        guard let root = contentView?.layer else { return }
+        let f = t.presentation()?.frame ?? t.frame
+        treatLive.removeAll { $0 === t }
+        t.removeFromSuperlayer()
+        let spot = CALayer()
+        spot.frame = f
+        root.addSublayer(spot)
+        burst(at: CGPoint(x: f.midX, y: f.midY), colors: "YyWY")
+        showBubble(on: spot, text: collect("golden"))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) { spot.removeFromSuperlayer() }
+    }
+
+    // 선물 비: 화면 위쪽 넓게 선물상자가 우르르 (어드벤트 캘린더)
+    func giftRain() {
+        guard let root = contentView?.layer else { return }
+        let spot = CALayer()
+        spot.frame = CGRect(x: root.bounds.width * 0.1, y: root.bounds.height - 12, width: root.bounds.width * 0.8, height: 10)
+        root.addSublayer(spot)
+        dropGifts(from: spot)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { spot.removeFromSuperlayer() }
+    }
+
+    // 새해 불꽃놀이: 띠 아래에서 쏘아 올려 여러 색으로 터진다
+    func fireworks(seconds: Double) {
+        guard let root = contentView?.layer else { return }
+        let w = root.bounds.width, h = root.bounds.height
+        let banner = CALayer()
+        banner.frame = CGRect(x: w / 2 - 60, y: h * 0.35, width: 120, height: 10)
+        root.addSublayer(banner)
+        _ = makeBubble("Happy New Year! 🎆", on: banner, root: root, scale: backingScaleFactor, stay: 6)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.5) { banner.removeFromSuperlayer() }
+        let end = CACurrentMediaTime() + seconds
+        Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { [weak self] timer in
+            guard let self = self, CACurrentMediaTime() < end else { timer.invalidate(); return }
+            let x = CGFloat.random(in: 0.08...0.92) * w, top = h * CGFloat.random(in: 0.45...0.9)
+            let rocket = CALayer()
+            rocket.contents = pieceImages["Y"]
+            rocket.magnificationFilter = .nearest
+            rocket.bounds = CGRect(x: 0, y: 0, width: 4, height: 8)
+            rocket.position = CGPoint(x: x, y: top)
+            root.addSublayer(rocket)
+            let up = CABasicAnimation(keyPath: "position.y")
+            up.fromValue = 0; up.toValue = top; up.duration = 0.7
+            up.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            CATransaction.begin()
+            CATransaction.setCompletionBlock { [weak self] in
+                rocket.removeFromSuperlayer()
+                self?.burst(at: CGPoint(x: x, y: top), colors: ["RRYW", "LLWY", "GGYW", "OOYR", "YYWy"].randomElement()!)
+            }
+            rocket.add(up, forKey: "up")
+            CATransaction.commit()
+        }
+    }
+}
+
 // ── 화면 맨 아래(독 뒤)에 눈꽃이 하나씩 쌓이고, 클릭하면 산타 제설차가 지나가며 치운다 ──────────────
 let pilePx: CGFloat = 2        // 쌓인 눈 그림 한 칸 = 2pt (내리는 눈꽃과 같은 크기)
 let pileCapPx = 22             // 다 찬 높이 평균(44pt). 실제 한도는 자리마다 물결처럼 오르내린다(capMap)
@@ -749,6 +1101,15 @@ final class PileWindow: NSPanel {
     var ph: [CGFloat] = []
     var saveTick = 0
     let front: NSPanel            // 제설차·루돌프·말풍선은 독 앞에 보이도록 위층 창에
+    var standers: [CALayer] = []  // 쌓인 눈 위에 선 것 — 만든 눈사람, 크리스마스 아침 선물상자
+    var building: CALayer?        // 지금 꾹 눌러 키우는 눈사람
+    var buildSpan = 0...0
+    var buildTimer: Timer?
+    var nextCarrot = 0.0           // 코 없는 눈사람이 생기면 그때부터 잰다
+    var lifeTimer: Timer?         // 눈사람 깜빡임·쳐다보기·손 흔들기·수다
+    var nextChat = CACurrentMediaTime() + Double.random(in: 60...150)
+    var paused = false
+    let displayID: UInt32
     var frontRoot: CALayer { front.contentView!.layer! }
     // 다 차는 데 걸리는 시간 = 6분 ÷ (눈 양 × 눈 높이 비율) → 눈이 적게 내리면 그만큼 천천히 쌓인다
     var fillSeconds: CGFloat { 360 / (amountFactor * bandRatio) }
@@ -770,6 +1131,7 @@ final class PileWindow: NSPanel {
         dockBand = side ? 0 : max(tile, big) + 28
         dockIcon = max(tile, big)
         let display = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+        displayID = display
         saveKey = "pile-\(display)"
         super.init(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         self.amountFactor = amountFactor
@@ -786,6 +1148,8 @@ final class PileWindow: NSPanel {
         let view = ClickView(frame: NSRect(origin: .zero, size: rect.size))
         view.wantsLayer = true
         view.onClick = { [weak self] p in self?.clicked(at: p) }
+        view.onHold = { [weak self] p in self?.holdPile(at: p) ?? false }
+        view.onHoldEnd = { [weak self] in self?.finishBuild() }
         contentView = view
         setFrame(rect, display: false)
 
@@ -831,8 +1195,15 @@ final class PileWindow: NSPanel {
             heights = (0..<cols).map { i in min(capMap[i], h[i * h.count / cols]) }
             redraw()
         }
+        // 눈사람 = [x, 크기, 모양] (1.2.x 의 "men" 은 x 만 있었다 → 모자 쓴 보통 눈사람)
+        let men = saved?["men2"] as? [[Double]] ?? (saved?["men"] as? [Double] ?? []).map { [$0, 3, 0] }
+        for m in men where m.count >= 3 && m.allSatisfy({ $0.isFinite }) && m[0] < Double(rect.width) {
+            _ = addMan(at: CGFloat(m[0]), tier: min(max(Int(m[1]), 1), 3), kind: min(max(Int(m[2]), 0), 3),
+                       nose: m.count < 4 || m[3] != 0)
+        }
 
         growTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.grow(1); self?.autosave() }
+        lifeTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in self?.lifeTick() }
         // 평소엔 클릭이 통과하고, 커서가 쌓인 눈이나 루돌프 위에 있을 때만 클릭을 받는다
         hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             guard let self = self else { return }
@@ -842,14 +1213,16 @@ final class PileWindow: NSPanel {
             let here = p.x >= 0 && p.x < self.frame.width
             if here && p.y <= 1 && self.dockBand > 0 && !self.dockUp { self.dockUp = true; self.dockHalf = self.dockWidth() / 2 }
             if !here || p.y > self.dockBand { self.dockUp = false }
-            self.front.ignoresMouseEvents = !self.onDeer(p)
-            self.ignoresMouseEvents = !self.onPile(p)
+            self.front.ignoresMouseEvents = self.paused || !self.onDeer(p)
+            if (self.contentView as? ClickView)?.isPressed == true { return }   // 누르는 중엔 손 뗄 때까지 받는다
+            self.ignoresMouseEvents = self.paused || (!self.onPile(p) && self.standerAt(p) == nil)
         }
     }
 
     func save() {
         guard !recording else { return }  // 녹화용 눈 더미가 진짜 쌓인 눈을 덮어쓰지 않게
-        UserDefaults.standard.set(["h": heights, "ph": ph.map { Double($0) }], forKey: saveKey)
+        let men = standers.filter { $0.name == "snowman" }.map { [Double($0.position.x), Double(manTier($0)), Double(manKind($0)), manNose($0) ? 1 : 0] }
+        UserDefaults.standard.set(["h": heights, "ph": ph.map { Double($0) }, "men2": men, "men": men.map { $0[0] }], forKey: saveKey)
     }
 
     func autosave() {
@@ -861,6 +1234,8 @@ final class PileWindow: NSPanel {
         save()
         growTimer?.invalidate()
         hoverTimer?.invalidate()
+        lifeTimer?.invalidate()
+        buildTimer?.invalidate()
         front.orderOut(nil)
     }
 
@@ -897,6 +1272,7 @@ final class PileWindow: NSPanel {
 
     func clicked(at p: CGPoint) {
         if onDeer(p) { tapDeer(at: p) }
+        else if let s = standerAt(p) { s.name == "gift" ? openGift(s) : s.name == "carrot" ? pickCarrot(s) : greet(s) }
         else if onPile(p) { puff(at: p); hideDeer(); sendPlow() }
     }
 
@@ -1023,6 +1399,7 @@ final class PileWindow: NSPanel {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         pileShape.path = path
+        for st in standers { st.position.y = surfaceY(st.position.x) + st.bounds.height / 2 - 3 }  // 눈이 줄면 같이 내려앉는다
         CATransaction.commit()
     }
 
@@ -1127,10 +1504,17 @@ final class PileWindow: NSPanel {
         truck.add(move, forKey: "drive")
 
         let t0 = CACurrentMediaTime()
+        var jumped = Set<ObjectIdentifier>()
         Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] timer in
             guard let self = self else { timer.invalidate(); return }
             let elapsed = CACurrentMediaTime() - t0
             let front = startX + speed * CGFloat(elapsed) + size.width / 2 - px   // 앞날 끝
+            // 제설차가 다가오면 눈사람이 "Not me!!" 하고 폴짝 뛰어 넘긴다
+            for l in self.standers.filter({ $0.name == "snowman" })
+            where !jumped.contains(ObjectIdentifier(l)) && front >= l.position.x - l.bounds.width / 2 - 75 {
+                jumped.insert(ObjectIdentifier(l))
+                self.dodge(l, truck: size, speed: speed)
+            }
             let upTo = min(self.heights.count, max(0, Int(front / pilePx)))
             let ahead = upTo < self.heights.count ? self.heights[upTo] : 0
             CATransaction.begin()
@@ -1154,10 +1538,474 @@ final class PileWindow: NSPanel {
     }
 }
 
+// ── 눈사람 그림: 크기 1(눈덩이)·2(두 단)·3(모자 쓴 세 단) × 모양 0 보통·1 산타 모자·2 고양이 귀·3 황금 ──
+// 눈동자를 한 칸 옮겨 커서 쪽을 보고(look −1·0·1), 눈을 감고(blink), 3단은 오른팔을 든다(wave)
+let manBodies: [(rows: [String], eyeRow: Int, eyes: [Int])] = [
+    (["..WWWW..", ".WWWWWW.", "WWKWWKWW", "WWWOOWWW", "WWWWWWWW", ".WWWWWW.", "..WWWW.."], 2, [2, 5]),
+    (["...WWWW...", "..WWWWWW..", "..WKWWKW..", "..WWOOWW..", "...WWWW...", "..RRRRRR..", ".WWWWWWWW.", ".WWWKWWWW.",
+      ".WWWWWWWW.", "..WWWWWW.."], 2, [3, 6]),
+    (snowmanRows, 4, [4, 7]),
+]
+var manCache: [String: CGImage] = [:]
+func manImage(tier: Int, kind: Int, look: Int, blink: Bool, wave: Bool, nose: Bool = true) -> CGImage {
+    let key = "\(tier)\(kind)\(look)\(blink)\(wave)\(nose)"
+    if let img = manCache[key] { return img }
+    let body = manBodies[min(max(tier, 1), 3) - 1]
+    var rows = body.rows.map { Array($0) }
+    if tier >= 3 {
+        switch kind {
+        case 1: rows[0] = Array(".......W...."); rows[1] = Array("....RRRRR..."); rows[2] = Array("...RRRRRR...")
+        case 2: rows[0] = Array("...W....W..."); rows[1] = Array("...WW..WW..."); rows[2] = Array("...WWWWWW...")
+        default: break
+        }
+        if wave { rows[7] = Array("..RRRRRRRR.B"); rows[8] = Array("B.RWWWWWWWB."); rows[9] = Array(".BWWWKWWWW..") }
+    }
+    for c in body.eyes { rows[body.eyeRow][c] = "W" }
+    if !blink { for c in body.eyes { rows[body.eyeRow][c + look] = "K" } }
+    var out = rows.map { String($0) }
+    if !nose { out = out.map { $0.replacingOccurrences(of: "O", with: "W") } }   // 당근 코 없는 눈사람
+    if kind == 3 { out = out.map { $0.replacingOccurrences(of: "W", with: "Y") } }
+    let img = spriteImage(out)
+    manCache[key] = img
+    return img
+}
+// 바닥에 떨어진 당근 — 주우면 코 없는 눈사람의 코가 된다
+let carrotSprite = spriteImage(["......g.g", ".OOOOOOgg", "OOOOOOOg.", ".OOOO...."])
+let manChats = [("Nice day, isn't it? ❄️", "Perfect snowman weather! ⛄"), ("Is Santa coming tonight? 🎅", "I hope so! 🎁"),
+                ("I think I'm melting… 😰", "Relax, it's freezing! 😄"), ("Do you like my scarf? 🧣", "Very stylish! ✨"),
+                ("Snowball fight? ⚪", "Not with our heads! 😆"), ("Can you see the Dock from there? 👀", "Only the top of it! 😄")]
+
+// ── 쌓인 눈 위에 서는 것: 길게 눌러 만든 눈사람 · 크리스마스 아침 선물상자 ──────────────
+extension PileWindow {
+    func setPaused(_ on: Bool, animated: Bool = true) {
+        guard on != paused else { return }
+        paused = on
+        NSAnimationContext.runAnimationGroup { c in
+            c.duration = animated ? 0.4 : 0
+            animator().alphaValue = on ? 0 : 1
+            front.animator().alphaValue = on ? 0 : 1
+        }
+    }
+
+    // 그 자리 눈 윗면 높이 (이웃 5칸 평균 = 그림 윤곽과 같은 높이)
+    func surfaceY(_ x: CGFloat) -> CGFloat {
+        let n = heights.count
+        guard n > 0 else { return 0 }
+        let i = min(max(Int(x / pilePx), 0), n - 1)
+        let r = max(0, i - 2)...min(n - 1, i + 2)
+        return CGFloat(r.reduce(0) { $0 + heights[$1] }) / CGFloat(r.count) * pilePx
+    }
+
+    func standerAt(_ p: CGPoint) -> CALayer? {
+        let underDock = dockUp && p.y <= dockBand && abs(p.x - frame.width / 2) <= dockHalf
+        guard !underDock, plow == nil else { return nil }
+        return standers.last { $0.frame.insetBy(dx: -4, dy: -4).contains(p) }
+    }
+
+    func stand(_ img: CGImage, px: CGFloat, at x: CGFloat, name: String) -> CALayer {
+        let l = CALayer()
+        l.name = name
+        l.contents = img
+        l.magnificationFilter = .nearest
+        l.bounds = CGRect(x: 0, y: 0, width: CGFloat(img.width) * px, height: CGFloat(img.height) * px)
+        l.position = CGPoint(x: x, y: surfaceY(x) + l.bounds.height / 2 - 3)
+        contentView?.layer?.addSublayer(l)
+        standers.append(l)
+        return l
+    }
+
+    func say(_ text: String, on l: CALayer) {
+        guard let root = contentView?.layer else { return }
+        l.sublayers?.forEach { $0.removeFromSuperlayer() }   // 말풍선이 겹쳐 쌓이지 않게
+        _ = makeBubble(text, on: l, root: root, scale: backingScaleFactor, stay: 2.5)
+    }
+
+    // 쌓인 눈을 0.55초 누르고 있으면 눈덩이가 생기고, 계속 누르면 0.5초마다 한 단씩 굴러 커진다
+    // (1단 눈덩이 → 2단 → 모자 쓴 3단). 손을 떼면 그 크기로 선다. 최대 3개, 넘으면 오래된 것부터 녹는다
+    func holdPile(at p: CGPoint) -> Bool {
+        if building == nil, let s = standerAt(p), s.name == "snowman" { melt(s); return true }   // 눈사람을 꾹 = 녹이기
+        guard building == nil, standerAt(p) == nil, onPile(p) else { return false }
+        let i = Int(p.x / pilePx), r = 22
+        let span = max(0, i - r)...min(heights.count - 1, i + r)
+        let avg = CGFloat(span.reduce(0) { $0 + heights[$1] }) / CGFloat(span.count)
+        if avg < 12 {   // 24pt 보다 얕으면 아직 못 만든다
+            let spot = stand(flakeImages[0], px: 1, at: p.x, name: "hint")
+            standers.removeAll { $0 === spot }
+            say("Need a bit more snow ⛄", on: spot)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { spot.removeFromSuperlayer() }
+            return true
+        }
+        let snowmen = standers.filter { $0.name == "snowman" }
+        if snowmen.count >= 3, let old = snowmen.first {
+            standers.removeAll { $0 === old }
+            old.removeFromSuperlayer()
+        }
+        buildSpan = span
+        scoop()
+        let man = addMan(at: p.x, tier: 1, kind: 0, nose: false)
+        building = man
+        popIn(man)
+        let roll = CAKeyframeAnimation(keyPath: "transform.rotation.z")   // 데굴데굴
+        roll.values = [0, -0.22, 0, 0.22, 0]; roll.duration = 0.5; roll.repeatCount = .infinity
+        man.add(roll, forKey: "roll")
+        buildTimer?.invalidate()
+        buildTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.growMan() }
+        return true
+    }
+
+    func scoop() {
+        for j in buildSpan where j < heights.count { heights[j] = Int(CGFloat(heights[j]) * 0.8) }
+        redraw()
+    }
+
+    func growMan() {
+        guard let man = building else { buildTimer?.invalidate(); return }
+        let tier = manTier(man) + 1
+        var kind = 0
+        if tier == 3 {   // 열 번에 한 번쯤 특별한 눈사람: 산타 모자 5% · 고양이 귀 4% · 황금 1%
+            let r = Int.random(in: 0..<100)
+            kind = r == 0 ? 3 : r <= 4 ? 2 : r <= 9 ? 1 : 0
+        }
+        scoop()
+        man.setValue(tier, forKey: "tier")
+        man.setValue(kind, forKey: "kind")
+        setMan(man, look: 0, blink: false, wave: false)
+        popIn(man)
+        puff(at: CGPoint(x: man.position.x, y: man.position.y - man.bounds.height / 2 + 6))
+        if tier >= 3 { finishBuild() }
+    }
+
+    func finishBuild() {
+        guard let man = building else { return }
+        building = nil
+        buildTimer?.invalidate()
+        man.removeAnimation(forKey: "roll")
+        let tier = manTier(man), kind = manKind(man)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self, weak man] in
+            guard let self = self, let man = man else { return }
+            self.wave(man)
+            if kind > 0 {
+                self.puff(at: man.position)
+                self.say(collect(["", "man-santa", "man-cat", "man-gold"][kind]), on: man)
+            } else {
+                self.say(tier == 1 ? "Hi! I'm a snowball ⚪" : tier == 2 ? "Hi! ⛄ (hold longer for a hat 🎩)" : "Hi! ⛄", on: man)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) { [weak self, weak man] in
+                guard let self = self, let man = man, man.superlayer != nil, !self.manNose(man) else { return }
+                man.sublayers?.forEach { $0.removeFromSuperlayer() }
+                self.say("Where's my nose? 🥕", on: man)
+            }
+        }
+        save()
+    }
+
+    // "Bye! 👋" 하고 스르르 주저앉아 녹고, 하늘색 웅덩이가 잠깐 남았다 사라진다
+    func melt(_ l: CALayer, quiet: Bool = false) {
+        guard standers.contains(where: { $0 === l }) else { return }
+        standers.removeAll { $0 === l }
+        save()
+        if !quiet { wave(l); say(["Bye! 👋", "See you next snow! ❄️", "Melting… 💧"].randomElement()!, on: l) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (quiet ? 0 : 1.1)) { [weak self] in
+            guard let self = self, let root = self.contentView?.layer else { l.removeFromSuperlayer(); return }
+            l.sublayers?.forEach { $0.removeFromSuperlayer() }
+            let h = l.bounds.height
+            let puddle = CALayer()
+            puddle.bounds = CGRect(x: 0, y: 0, width: l.bounds.width * 1.3, height: 7)
+            puddle.cornerRadius = 3.5
+            puddle.backgroundColor = CGColor(red: 0.72, green: 0.84, blue: 0.96, alpha: 0.9)
+            puddle.position = CGPoint(x: l.position.x, y: l.position.y - h / 2 + 3)
+            puddle.opacity = 0
+            root.insertSublayer(puddle, below: l)
+            CATransaction.begin()
+            CATransaction.setCompletionBlock {
+                l.removeFromSuperlayer()
+                let dry = CABasicAnimation(keyPath: "opacity")
+                dry.fromValue = 0.9; dry.toValue = 0; dry.duration = 1.4
+                dry.isRemovedOnCompletion = false; dry.fillMode = .forwards
+                CATransaction.begin()
+                CATransaction.setCompletionBlock { puddle.removeFromSuperlayer() }
+                puddle.add(dry, forKey: "dry")
+                CATransaction.commit()
+            }
+            let squash = CABasicAnimation(keyPath: "transform.scale.y")
+            squash.toValue = 0.08
+            let sink = CABasicAnimation(keyPath: "position.y")
+            sink.byValue = -h * 0.46
+            let widen = CABasicAnimation(keyPath: "transform.scale.x")
+            widen.toValue = 1.25
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.toValue = 0.3
+            let show = CABasicAnimation(keyPath: "opacity")
+            show.fromValue = 0; show.toValue = 0.9; show.duration = 0.9
+            show.isRemovedOnCompletion = false; show.fillMode = .forwards
+            puddle.add(show, forKey: "show")
+            let g = CAAnimationGroup()
+            g.animations = [squash, sink, widen, fade]
+            g.duration = 0.9
+            g.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            g.isRemovedOnCompletion = false; g.fillMode = .forwards
+            l.add(g, forKey: "melt")
+            CATransaction.commit()
+        }
+    }
+
+    // 메뉴 'Melt all snowmen' — 왼쪽부터 차례로 녹는다
+    func meltAll() {
+        if let b = building { finishBuild(); _ = b }
+        let men = standers.filter { $0.name == "snowman" }.sorted { $0.position.x < $1.position.x }
+        for (i, m) in men.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.35) { [weak self] in self?.melt(m) }
+        }
+    }
+
+    func popIn(_ l: CALayer) {
+        let pop = CAKeyframeAnimation(keyPath: "transform.scale")
+        pop.values = [0.3, 1.15, 1]; pop.keyTimes = [0, 0.7, 1]; pop.duration = 0.35
+        l.add(pop, forKey: "pop")
+    }
+
+    func addMan(at x: CGFloat, tier: Int, kind: Int, nose: Bool = true) -> CALayer {
+        let l = stand(manImage(tier: tier, kind: kind, look: 0, blink: false, wave: false, nose: nose), px: 3, at: x, name: "snowman")
+        l.setValue(tier, forKey: "tier")
+        l.setValue(kind, forKey: "kind")
+        l.setValue(nose, forKey: "nose")
+        return l
+    }
+
+    func manNose(_ l: CALayer) -> Bool { l.value(forKey: "nose") as? Bool ?? true }
+
+    // 코 없는 눈사람이 있으면 20–60초 뒤 쌓인 눈 위에 당근 하나 (독 앞·다른 것 옆은 피한다)
+    func dropCarrot() {
+        let w = frame.width
+        let half = dockBand > 0 ? dockWidth() / 2 + 20 : 0
+        for _ in 0..<12 {
+            let x = CGFloat.random(in: 30...(w - 30))
+            if abs(x - w / 2) < half { continue }
+            if standers.contains(where: { abs($0.position.x - x) < 50 }) { continue }
+            let c = stand(carrotSprite, px: 3, at: x, name: "carrot")
+            popIn(c)
+            return
+        }
+    }
+
+    // 당근을 누르면 가장 가까운 코 없는 눈사람에게 날아가 코가 된다
+    func pickCarrot(_ c: CALayer) {
+        standers.removeAll { $0 === c }
+        puff(at: c.position)
+        let noseless = standers.filter { $0.name == "snowman" && !manNose($0) && $0 !== building }
+        guard let man = noseless.min(by: { abs($0.position.x - c.position.x) < abs($1.position.x - c.position.x) }) else {
+            say("Crunch! 🥕", on: c)
+            c.contents = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.8) { c.removeFromSuperlayer() }
+            return
+        }
+        let from = c.position, to = CGPoint(x: man.position.x, y: man.position.y + man.bounds.height * 0.1)
+        let fly = CAKeyframeAnimation(keyPath: "position")
+        let path = CGMutablePath()
+        path.move(to: from)
+        path.addQuadCurve(to: to, control: CGPoint(x: (from.x + to.x) / 2, y: max(from.y, to.y) + 70))
+        fly.path = path
+        fly.duration = 0.55
+        fly.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        let shrink = CABasicAnimation(keyPath: "transform.scale")
+        shrink.fromValue = 1; shrink.toValue = 0.4; shrink.duration = 0.55
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self, weak man] in
+            c.removeFromSuperlayer()
+            guard let self = self, let man = man, man.superlayer != nil else { return }
+            man.setValue(true, forKey: "nose")
+            man.setValue(nil, forKey: "manFrame")
+            self.setMan(man, look: 0, blink: false, wave: false)
+            self.popIn(man)
+            self.wave(man)
+            man.sublayers?.forEach { $0.removeFromSuperlayer() }
+            self.say(["Thank you! 🥕", "My nose! 😆", "Now I can smell the snow! 👃"].randomElement()!, on: man)
+            self.save()
+        }
+        c.position = to
+        c.transform = CATransform3DMakeScale(0.4, 0.4, 1)
+        c.add(fly, forKey: "fly")
+        c.add(shrink, forKey: "shrink")
+        CATransaction.commit()
+    }
+
+    func manTier(_ l: CALayer) -> Int { l.value(forKey: "tier") as? Int ?? 3 }
+    func manKind(_ l: CALayer) -> Int { l.value(forKey: "kind") as? Int ?? 0 }
+
+    // 그림 바꾸기 — 크기가 바뀌면 발이 눈 위에 붙어 있게 높이도 다시 잡는다
+    func setMan(_ l: CALayer, look: Int, blink: Bool, wave: Bool) {
+        let tier = manTier(l), kind = manKind(l), nose = manNose(l)
+        let key = "\(tier)\(kind)\(look)\(blink)\(wave)\(nose)"
+        guard l.value(forKey: "manFrame") as? String != key else { return }
+        l.setValue(key, forKey: "manFrame")
+        let img = manImage(tier: tier, kind: kind, look: look, blink: blink, wave: wave, nose: nose)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        l.contents = img
+        let size = CGSize(width: CGFloat(img.width) * 3, height: CGFloat(img.height) * 3)
+        if l.bounds.size != size {
+            l.bounds = CGRect(origin: .zero, size: size)
+            l.position.y = surfaceY(l.position.x) + size.height / 2 - 3
+        }
+        CATransaction.commit()
+    }
+
+    // 손 흔들기 (3단은 오른팔을 흔들고, 작은 눈사람은 통통 뛴다)
+    func wave(_ l: CALayer) {
+        l.setValue(CACurrentMediaTime() + 1.6, forKey: "waveUntil")
+        if manTier(l) < 3 && l.name == "snowman" && l !== building {
+            let hop = CAKeyframeAnimation(keyPath: "position.y")
+            hop.values = [0, 9, 0, 6, 0]; hop.isAdditive = true; hop.duration = 0.7
+            l.add(hop, forKey: "hop")
+        }
+    }
+
+    // 0.15초마다: 커서 쪽을 쳐다보고, 가끔 깜빡이고, 커서가 처음 다가오면 손을 흔든다. 가끔 눈사람끼리 수다
+    func lifeTick() {
+        guard !paused else { return }
+        let men = standers.filter { $0.name == "snowman" }
+        guard !men.isEmpty else { return }
+        let now = CACurrentMediaTime()
+        let m = NSEvent.mouseLocation
+        let c = CGPoint(x: m.x - frame.minX, y: m.y - frame.minY)
+        for l in men {
+            let dx = c.x - l.position.x
+            let near = abs(dx) < 260 && c.y > -10 && c.y < 280
+            let look = near ? (dx < -14 ? -1 : dx > 14 ? 1 : 0) : 0
+            if near, l.value(forKey: "near") as? Bool != true, now > (l.value(forKey: "waveCool") as? Double ?? 0), l !== building {
+                wave(l)
+                l.setValue(now + 25, forKey: "waveCool")
+            }
+            l.setValue(near, forKey: "near")
+            var blinkUntil = l.value(forKey: "blinkUntil") as? Double ?? 0
+            if now > blinkUntil + 0.6 && Double.random(in: 0..<1) < 0.03 {
+                blinkUntil = now + 0.14
+                l.setValue(blinkUntil, forKey: "blinkUntil")
+            }
+            if Double.random(in: 0..<1) < 0.0015 { wave(l) }   // 가끔 혼자서도
+            let waving = now < (l.value(forKey: "waveUntil") as? Double ?? 0)
+            setMan(l, look: look, blink: now < blinkUntil, wave: waving && manTier(l) == 3 && Int(now * 4) % 2 == 0)
+        }
+        guard building == nil, plow == nil else { return }
+        let wantsCarrot = men.contains { !manNose($0) } && !standers.contains { $0.name == "carrot" }
+        if !wantsCarrot { nextCarrot = 0 }
+        else if nextCarrot == 0 { nextCarrot = now + Double.random(in: 20...60) }
+        else if now > nextCarrot { nextCarrot = 0; dropCarrot() }
+        if now > nextChat {
+            nextChat = now + Double.random(in: 90...200)
+            if men.count >= 2 { chat(men) }
+        }
+    }
+
+    // 눈사람끼리 수다: 하나가 말하면 2.6초 뒤 다른 하나가 받는다
+    func chat(_ men: [CALayer]) {
+        var two = Array(men.shuffled().prefix(2))
+        guard two.count == 2 else { return }
+        // 스카프 얘기는 스카프를 한 눈사람(2·3단)만 꺼낸다 — 1단 눈덩이는 목이 없다
+        var lines = manChats
+        if manTier(two[0]) < 2 {
+            if manTier(two[1]) >= 2 { two.swapAt(0, 1) } else { lines = lines.filter { !$0.0.contains("scarf") } }
+        }
+        let line = lines.randomElement()!
+        wave(two[0]); say(line.0, on: two[0])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { [weak self, weak b = two[1]] in
+            guard let self = self, let b = b, self.standers.contains(where: { $0 === b }) else { return }
+            self.wave(b); self.say(line.1, on: b)
+        }
+    }
+
+    // 제설차를 폴짝 뛰어 넘긴다: 올라가 있는 동안 차가 밑으로 지나간다
+    func dodge(_ l: CALayer, truck: CGSize, speed: CGFloat) {
+        let rise = 0.28, fall = 0.3
+        let hold = Double((75 + l.bounds.width + truck.width + 10) / speed) - rise
+        let total = rise + hold + fall
+        let h = truck.height + 12
+        let jump = CAKeyframeAnimation(keyPath: "position.y")
+        jump.values = [0, h, h + 4, h, 0]
+        jump.keyTimes = [0, NSNumber(value: rise / total), NSNumber(value: (rise + hold / 2) / total), NSNumber(value: (rise + hold) / total), 1]
+        jump.isAdditive = true
+        jump.duration = total
+        l.add(jump, forKey: "dodge")
+        l.setValue(CACurrentMediaTime() + total, forKey: "waveUntil")
+        if l.frame.maxY + h + 44 <= frame.height {   // 뛰어오른 높이에서도 말풍선이 창 안에 들어갈 때만
+            say(["Not me!! 😱", "Whoa! 🙀", "Hop! 🦘"].randomElement()!, on: l)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + total + 0.2) { [weak self, weak l] in
+            guard let self = self, let l = l, l.superlayer != nil else { return }
+            l.sublayers?.forEach { $0.removeFromSuperlayer() }
+            self.say(["Phew! 😅", "That was close! 😮‍💨", "Still here! ⛄"].randomElement()!, on: l)
+        }
+    }
+
+    func greet(_ l: CALayer) {
+        wave(l)
+        let lines: [String]
+        if !manNose(l) {
+            say(["Have you seen a carrot? 🥕", "I lost my nose… 👃", "Find me a carrot? 🥕"].randomElement()!, on: l)
+            return
+        }
+        switch (manTier(l), manKind(l)) {
+        case (_, 1): lines = ["Ho ho ho! 🎅", "I borrowed Santa's hat 🎅", "Been good this year? 🎁"]
+        case (_, 2): lines = ["Meow! 🐱", "Purr… it's cold 🐾", "Got any fish? 🐟"]
+        case (_, 3): lines = ["I'm shiny! ✨", "Solid gold snow 🌟", "Make a wish! 🌟"]
+        case (1, _): lines = ["I'm still small! ⚪", "Roll me bigger next time! ⚪"]
+        case (2, _): lines = ["Almost tall enough for a hat 🎩", "Hello there! ⛄"]
+        default: lines = ["Merry Christmas! 🎄", "Thanks for building me! ⛄", "I like it here ❄️"]
+        }
+        say(lines.randomElement()!, on: l)
+    }
+
+    // 크리스마스 아침: 쌓인 눈 위에 선물상자 여섯 개. 누르면 퐁 열린다
+    func placeGifts() {
+        guard !standers.contains(where: { $0.name == "gift" }) else { return }
+        let w = frame.width
+        let half = dockBand > 0 ? dockWidth() / 2 + 20 : 0
+        let side = w / 2 - half   // 독 왼쪽·오른쪽에 남는 폭
+        for k in 0..<6 {
+            let x: CGFloat
+            if side >= 90 {       // 왼쪽 3개 · 오른쪽 3개
+                let along = side * (CGFloat(k % 3) + CGFloat.random(in: 0.25...0.75)) / 3
+                x = k < 3 ? along : w - along
+            } else {
+                x = w * (CGFloat(k) + CGFloat.random(in: 0.25...0.75)) / 6
+            }
+            _ = stand(giftSprites[k % giftSprites.count], px: 3.5, at: x, name: "gift")
+        }
+    }
+
+    func openGift(_ g: CALayer) {
+        puff(at: g.position)
+        say(["Merry Christmas! 🎁", "A warm hug for you! 🤗", "Cookies! 🍪", "A little joy, just for you ✨",
+             "Ho ho ho! 🎅", "You're on the nice list! 📜"].randomElement()!, on: g)
+        g.contents = nil   // 상자는 사라지고 말풍선만 잠깐
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.8) { [weak self, weak g] in
+            guard let self = self, let g = g else { return }
+            self.standers.removeAll { $0 === g }
+            g.removeFromSuperlayer()
+        }
+    }
+}
+
 // ── 메뉴에서 바로 업데이트 ──────────────
 // 깃허브 최신 릴리스(태그 vX.Y.Z)가 이 버전보다 높으면 ❄︎ 메뉴 맨 위에 'Update to …' 가 뜬다.
 // ⚠ 릴리스를 낼 때마다 이 값과 태그를 같이 올릴 것 (같은 태그에 파일만 바꾸면 업데이트로 안 잡힌다)
-let appVersion = "1.2.2"
+let appVersion = "1.3.0"
+// 업데이트한 사람이 처음 켤 때 한 번 보여 주는 안내 (릴리스마다 새로 쓴다. 비우면 안 뜬다)
+let whatsNew = """
+💡 Christmas lights twinkle along the top of your screen
+
+⛄ Press and hold the snow pile to build a snowman — keep holding and it grows taller. Once in a while you'll get a special one!
+
+🥕 New snowmen have no nose. Watch for a carrot in the snow and click it
+
+💧 Press and hold a snowman to melt it, or use Melt all snowmen in the ❄︎ menu
+
+⭐ Rare visitors: a golden snowflake, a polar bear, an owl, an Arctic fox and an elf. Click them to collect (❄︎ → Rare finds)
+
+🎁 An advent calendar opens in the ❄︎ menu on December 1, with surprises on Christmas Eve, Christmas Day and New Year's
+
+🙈 Need a break? ❄︎ → Hide for… 30 minutes or 1 hour
+"""
 // 확인용: XMASSNOW_FEED 로 가짜 릴리스 정보를 줄 수 있다 (그때는 그 주소에서 받는 것도 허용)
 let testFeed = ProcessInfo.processInfo.environment["XMASSNOW_FEED"]
 let releaseFeed = URL(string: testFeed ?? "https://api.github.com/repos/imhuijeong92-ui/xmas-snow/releases/latest")!
@@ -1201,7 +2049,7 @@ func nextIndex(_ key: String, count: Int) -> Int {
 }
 
 // 지나가는 산타가 알려 주는 크리스마스 디데이 (12/26 부터는 다음 해 크리스마스까지)
-func christmasCountdown(_ now: Date = Date()) -> String {
+func christmasCountdown(_ now: Date = appNow()) -> String {
     let cal = Calendar.current
     let today = cal.startOfDay(for: now)
     var xmas = cal.date(from: DateComponents(year: cal.component(.year, from: today), month: 12, day: 25))!
@@ -1306,6 +2154,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var starTimer: Timer?
     var santaTimer: Timer?
     var visitorTimer: Timer?
+    var hideTimer: Timer?
+    var dayTimer: Timer?
+    var lastDay = ""
 
     func applicationWillTerminate(_ n: Notification) { piles.forEach { $0.save() } }
 
@@ -1323,10 +2174,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleSanta(first: true)
         scheduleVisitor(first: true)
         scheduleStar(first: true)
+        NotificationCenter.default.addObserver(forName: collectedChanged, object: nil, queue: .main) { [weak self] _ in self?.buildMenu() }
+        hideTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.applyHide() }
+        checkDay()
+        dayTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.checkDay() }
         // 처음 켰을 때(새 버전으로 처음 켜졌을 때 포함) 한 번만 짧은 동화를 보여 준다 — 메뉴에 이야기책이 있다는 걸 알게
-        if UserDefaults.standard.string(forKey: "storyShownVersion") != appVersion {
+        // 업데이트해서 처음 켜졌으면 동화 대신 '새로 생긴 것' 안내를 한 번 보여 준다
+        let shownVersion = UserDefaults.standard.string(forKey: "storyShownVersion")
+        if shownVersion != appVersion {
             UserDefaults.standard.set(appVersion, forKey: "storyShownVersion")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.tellStory(hint: true) }
+            if let old = shownVersion, isNewer(appVersion, than: old), !whatsNew.isEmpty {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.say("What's new in Xmas Snow \(appVersion) ✨", whatsNew) }
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.tellStory(hint: true) }
+            }
         }
         // 새 버전 확인 = 켜고 1분 뒤, 그 뒤로 12시간마다 (깃허브에 버전만 묻는다)
         DispatchQueue.main.asyncAfter(deadline: .now() + 60) { self.checkForUpdate() }
@@ -1344,6 +2205,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--demo4") {  // 눈 더미 채워 두고 제설차
             piles.forEach { p in p.carry = 9000; p.grow(0) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.piles.forEach { $0.puff(at: CGPoint(x: 300, y: 30)); $0.hideDeer() }; self.callPlow() }
+        }
+        if CommandLine.arguments.contains("--demo8") {  // 1.3 시험: 드문 손님·황금 눈송이·눈사람·선물·불꽃놀이
+            piles.forEach { p in p.carry = 9000; p.grow(0) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { ["bear", "owl", "fox", "elf"].forEach { self.callRare($0) } }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.piles.forEach { p in _ = p.holdPile(at: CGPoint(x: p.frame.width * 0.3, y: 10)) } }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.piles.forEach { $0.placeGifts() } }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self.windows.forEach { $0.fireworks(seconds: 8) } }
+        }
+        if CommandLine.arguments.contains("--demo9") {  // 눈사람 놀이: 크기별·특별한 눈사람 · 꾹 눌러 키우기 · 수다 · 제설차 피하기
+            piles.forEach { p in p.carry = 9000; p.grow(0) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.piles.forEach { p in
+                let w = p.frame.width
+                for (i, (t, k)) in [(1, 0), (2, 0), (3, 1), (3, 2), (3, 3)].enumerated() {
+                    _ = p.addMan(at: i < 3 ? w * (0.06 + 0.08 * CGFloat(i)) : w * (0.72 + 0.08 * CGFloat(i - 3)), tier: t, kind: k, nose: i != 1)
+                }
+                _ = p.holdPile(at: CGPoint(x: w * 0.94, y: 10))
+            } }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self.piles.forEach { $0.chat($0.standers.filter { $0.name == "snowman" }) } }
+            if CommandLine.arguments.contains("--melt") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self.piles.forEach { p in
+                    if let m = p.standers.first(where: { $0.name == "snowman" }) { _ = p.holdPile(at: m.position) } } }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 9) { self.meltSnowmen() }
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 7) { self.piles.forEach { $0.dropCarrot() } }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10) { self.piles.forEach { p in
+                    if let c = p.standers.first(where: { $0.name == "carrot" }) { p.pickCarrot(c) } } }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 20) { self.piles.forEach { $0.hideDeer() }; self.callPlow() }
+            }
         }
         if CommandLine.arguments.contains("--demo6") {  // 업데이트: XMASSNOW_FEED 의 가짜 릴리스로 바로 설치까지
             checkForUpdate()
@@ -1421,7 +2310,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         visitorTimer = Timer.scheduledTimer(withTimeInterval: first ? 60 : Double.random(in: 180...420), repeats: false) { [weak self] _ in
             guard let self = self else { return }
             let on = [("snowman", self.snowmanOn), ("penguin", self.penguinOn)].filter { $0.1 }.map { $0.0 }
-            if let who = on.randomElement() { self.callVisitor(who) }
+            if !on.isEmpty && Int.random(in: 0..<100) < 12 { self.callRare(nil) }   // 가끔 드문 손님
+            else if let who = on.randomElement() { self.callVisitor(who) }
             self.scheduleVisitor()
         }
     }
@@ -1448,7 +2338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func scheduleSanta(first: Bool = false) {
         santaTimer?.invalidate()
         guard santaOn else { return }
-        let wait = first ? 20 : Double.random(in: 300...720)
+        let wait = first ? 20 : monthDay() == (12, 24) ? Double.random(in: 120...300) : Double.random(in: 300...720)  // 이브엔 자주
         santaTimer = Timer.scheduledTimer(withTimeInterval: wait, repeats: false) { [weak self] _ in
             self?.callSanta()
             self?.scheduleSanta()
@@ -1471,8 +2361,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         order[i].flySanta(talk: talk) { [weak self] in self?.fly(order, i + 1) }
     }
 
+    var shownWindows: [SnowWindow] { windows.filter { !$0.paused }.isEmpty ? windows : windows.filter { !$0.paused } }
+
     func callVisitor(_ who: String) {
-        windows.randomElement()?.walk(who)
+        shownWindows.randomElement()?.walk(who)
     }
 
     @objc func callSnowman() { callVisitor("snowman") }
@@ -1536,15 +2428,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(sub("⏬ Fall speed", fallSpeeds.enumerated().map { item($1.title, #selector(pickFallSpeed(_:)), tag: $0, on: $0 == fallSpeedIndex) }))
         m.addItem(sub("🍬 Falling treats", treatGroups.enumerated().map { item($1.title, #selector(toggleTreat(_:)), tag: $0, on: !treatsOff.contains($0)) }))
         m.addItem(item("🏔 Snow piles up", #selector(togglePile), on: pileOn))
-        let tip = NSMenuItem(title: "Tip: click the pile to clear it 🚜", action: nil, keyEquivalent: "")
-        tip.isEnabled = false   // 회색 안내 한 줄 — 쌓인 눈을 누르면 치울 수 있다는 걸 알려 준다
-        tip.indentationLevel = 1
-        m.addItem(tip)
+        // 회색 안내 — 쌓인 눈을 누르면 치우고, 길게 누르면 눈사람, 눈사람을 길게 누르면 녹는다
+        for t in ["Tip: click the pile to clear it 🚜", "Tip: press and hold the pile to build a snowman ⛄",
+                  "Tip: press and hold a snowman to melt it 💧"] {
+            let tip = NSMenuItem(title: t, action: nil, keyEquivalent: "")
+            tip.isEnabled = false
+            tip.indentationLevel = 1
+            m.addItem(tip)
+        }
+        m.addItem(item("💡 Christmas lights", #selector(toggleLights), on: lightsOn))
+        if let until = hideUntil, until > Date() {
+            let f = DateFormatter()
+            f.timeStyle = .short
+            m.addItem(item("▶︎ Show snow now (hidden until \(f.string(from: until)))", #selector(showNow)))
+        } else {
+            m.addItem(sub("🙈 Hide for…", [item("30 minutes", #selector(hideFor(_:)), tag: 30),
+                                          item("1 hour", #selector(hideFor(_:)), tag: 60)]))
+        }
         m.addItem(.separator())
         m.addItem(sub("🛷 Visitors", [item("Santa 🎅", #selector(toggleSanta), on: santaOn),
                                           item("Snowman ⛄", #selector(toggleSnowman), on: snowmanOn),
                                           item("Penguin 🐧", #selector(togglePenguin), on: penguinOn),
                                           item("Shooting star 🌠", #selector(toggleStar), on: starOn)]))
+        m.addItem(sub("⭐ Rare finds \(collected.count)/\(rareFinds.count)", rareFinds.map { r in
+            let it = item(collected.contains(r.id) ? "\(r.emoji) \(r.name)" : "???", nil)
+            it.isEnabled = false
+            return it
+        }))
+        m.addItem(item("💧 Melt all snowmen", #selector(meltSnowmen)))
         m.addItem(sub("🎅 Santa speed", santaSpeeds.enumerated().map { item($1.title, #selector(pickSantaSpeed(_:)), tag: $0, on: $0 == santaSpeedIndex) }))
         m.addItem(sub("📣 Call now", [item("Santa 🎅", #selector(callSanta)),
                                        item("Snowman ⛄", #selector(callSnowman)),
@@ -1552,6 +2463,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                        item("Shooting star 🌠", #selector(callStar)),
                                        item("Snowplow 🚜", #selector(callPlow))]))
         m.addItem(.separator())
+        // 어드벤트 캘린더: 11월엔 며칠 뒤 열리는지, 12/1–25 엔 오늘 칸, 그 밖엔 안 보인다
+        let (mo, da) = monthDay()
+        if mo == 12 && da <= 25 {
+            let opened = adventOpened().contains(da)
+            m.addItem(item("🎁 Advent calendar — Day \(da)" + (opened ? "" : "  ✨ new"), #selector(openAdvent)))
+        } else if mo == 11 {
+            let left = 31 - da
+            let soon = item("🎁 Advent calendar — opens Dec 1 (\(left) day\(left == 1 ? "" : "s"))", nil)
+            soon.isEnabled = false
+            m.addItem(soon)
+        }
         m.addItem(item("📖 A little story", #selector(showStory)))  // 고를 때마다 다음 짧은 동화
         m.addItem(item("Check for updates… (v\(appVersion))", #selector(checkNow)))
         let quit = NSMenuItem(title: "Stop snow (Quit)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -1705,6 +2627,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         piles = recording ? [PileWindow(screen: NSScreen.screens[0], amountFactor: amountFactor)]
               : pileOn ? NSScreen.screens.map { PileWindow(screen: $0, amountFactor: amountFactor) } : []
         piles.forEach { $0.show() }
+        if !recording {
+            applyHide(animated: false)
+            if monthDay() == (12, 25) { piles.forEach { $0.placeGifts() } }
+        }
     }
 
     @objc func togglePile() {
@@ -1715,6 +2641,106 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func callPlow() { piles.forEach { $0.sendPlow() } }
+
+    // ── 1.3 ──
+    @objc func toggleLights() {
+        lightsOn.toggle()
+        UserDefaults.standard.set(lightsOn, forKey: "lights")
+        for w in windows {
+            w.contentView?.layer?.sublayers?.filter { $0.name == "lights" }.forEach { $0.removeFromSuperlayer() }
+            if lightsOn, let scr = w.screen { w.addLights(scr) }
+        }
+        buildMenu()
+    }
+
+    @objc func hideFor(_ sender: NSMenuItem) {
+        hideUntil = Date().addingTimeInterval(Double(sender.tag) * 60)
+        UserDefaults.standard.set(hideUntil!.timeIntervalSince1970, forKey: "hideUntil")
+        applyHide()
+        buildMenu()
+    }
+
+    @objc func showNow() {
+        hideUntil = nil
+        UserDefaults.standard.removeObject(forKey: "hideUntil")
+        applyHide()
+        buildMenu()
+    }
+
+    // 숨긴 시각이 지났으면 다시 보이고 메뉴도 'Hide for…' 로 돌려놓는다
+    func applyHide(animated: Bool = true) {
+        let hidden = hideUntil.map { $0 > Date() } ?? false
+        if !hidden && hideUntil != nil {
+            hideUntil = nil
+            UserDefaults.standard.removeObject(forKey: "hideUntil")
+            buildMenu()
+        }
+        windows.forEach { $0.setPaused(hidden, animated: animated) }
+        piles.forEach { $0.setPaused(hidden, animated: animated) }
+    }
+
+    // 30초마다: 날짜가 바뀌면 메뉴(어드벤트 칸) 새로, 12/25 엔 선물상자, 1/1 0시 10분 안엔 불꽃놀이
+    func checkDay() {
+        let now = appNow()
+        let c = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: now)
+        let day = "\(c.year ?? 0)-\(c.month ?? 0)-\(c.day ?? 0)"
+        if day != lastDay {
+            lastDay = day
+            buildMenu()
+            if c.month == 12 && c.day == 25 { piles.forEach { $0.placeGifts() } }
+        }
+        let year = c.year ?? 0
+        if c.month == 1 && c.day == 1 && c.hour == 0 && (c.minute ?? 99) < 10 && store.integer(forKey: "fireworks") != year,
+           windows.contains(where: { !$0.paused }) {   // 다 숨어 있으면 안 쏘고 30초 뒤 다시 본다
+            store.set(year, forKey: "fireworks")
+            windows.forEach { $0.fireworks(seconds: 40) }
+        }
+    }
+
+    func adventOpened() -> Set<Int> {
+        let c = Calendar.current.dateComponents([.year], from: appNow())
+        return Set(store.array(forKey: "advent-\(c.year ?? 0)") as? [Int] ?? [])
+    }
+
+    @objc func openAdvent() {
+        let (mo, da) = monthDay()
+        guard mo == 12, da >= 1, da <= 25 else { return }
+        let year = Calendar.current.component(.year, from: appNow())
+        store.set(Array(adventOpened().union([da])), forKey: "advent-\(year)")
+        let gift = adventDays[da - 1]
+        let a = NSAlert()
+        a.messageText = "🎁 Day \(da)"
+        a.informativeText = gift.text
+        let img = giftSprites[da % giftSprites.count]
+        a.icon = NSImage(cgImage: img, size: NSSize(width: img.width * 8, height: img.height * 8))
+        a.addButton(withTitle: "Open 🎁")
+        NSApp.activate(ignoringOtherApps: true)
+        a.runModal()
+        buildMenu()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.adventGift(gift.gift) }
+    }
+
+    func adventGift(_ g: String) {
+        switch g {
+        case "santa": callSanta()
+        case "snowman", "penguin": callVisitor(g)
+        case "star": callStar()
+        case "treats": windows.forEach { $0.treatDebt += 8 }
+        case "rare": callRare(nil)
+        case "xmas":
+            if piles.isEmpty { windows.forEach { $0.giftRain() } } else { piles.forEach { $0.placeGifts() } }
+        default: windows.forEach { $0.giftRain() }
+        }
+    }
+
+    @objc func meltSnowmen() { piles.forEach { $0.meltAll() } }
+
+    // 드문 손님 — 아직 못 만난 친구부터
+    func callRare(_ id: String?) {
+        let walkers = ["bear", "owl", "fox", "elf"]
+        let pick = id ?? (walkers.filter { !collected.contains($0) }.randomElement() ?? walkers.randomElement()!)
+        shownWindows.randomElement()?.wander(pick)
+    }
 }
 
 let app = NSApplication.shared

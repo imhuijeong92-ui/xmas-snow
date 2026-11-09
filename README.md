@@ -22,6 +22,14 @@ Set the snow height to **1/8** and it stays in a thin strip along the top while 
   - The snow pile (or Rudolph) → Santa drives by in a snowplow 🚜 and clears it
 - **Snow piles up** in soft, lumpy drifts along the bottom of your screen — behind the Dock on macOS, just above the taskbar on Windows. Less snow or a lower snow height means it piles up more slowly. Once it reaches its full height it stays there, and Rudolph peeks in from the right edge to ask *"Time to clear the snow?"*
 - A few **little Christmas stories** are hidden in there too. When Rudolph peeks in, **click him 5 times quickly** and he'll tell you one 🤫 — and there's a little storybook in the ❄︎ menu 📖
+- **New in 1.3 (macOS for now — Windows is coming):**
+  - 💡 **Christmas lights** twinkle along the top of the screen
+  - ⛄ **Build a snowman**: press and hold the snow pile. Keep holding and it grows from a snowball to a two-tier to a full snowman with a hat. Once in a while you get a special one (Santa hat, cat ears or gold)
+  - Snowmen **blink, look at your cursor, wave**, chat with each other, and hop over the snowplow
+  - 🥕 New snowmen have **no nose** — a carrot shows up in the snow now and then. Click it and it flies to a snowman
+  - 💧 Press and hold a snowman to **melt** it
+  - ⭐ **Rare visitors**: a golden snowflake, a polar bear, an owl, an Arctic fox and an elf. Click them to collect
+  - 🎁 An **advent calendar** opens on December 1, with surprises on Christmas Eve, Christmas Day and New Year's
 - Works across **multiple monitors** — Santa flies from one screen to the next
 - Light on resources: under 1% of total CPU on an M1 Mac (about 6–7% of one core) and about 27 MB of memory
 
@@ -36,6 +44,11 @@ Click ❄︎ in the menu bar (macOS) or right-click the ❄ tray icon (Windows):
 | Fall speed | Slow / Normal / Fast |
 | Falling treats | Turn each treat on or off |
 | Snow piles up | Turn the snow pile on or off. Click the pile any time to clear it |
+| 💡 Christmas lights *(macOS)* | Turn the lights along the top on or off |
+| 🙈 Hide for… *(macOS)* | Hide everything for 30 minutes or 1 hour (*Show snow now* brings it back early) |
+| ⭐ Rare finds *(macOS)* | The rare visitors and special snowmen you've found so far |
+| 💧 Melt all snowmen *(macOS)* | Melt every snowman you've built |
+| 🎁 Advent calendar *(macOS)* | Open today's door, December 1–25 |
 | Visitors | Turn Santa / Snowman / Penguin / Shooting star on or off |
 | Santa speed | Slow / Normal / Fast |
 | Call now | Summon any visitor or the snowplow right away |
@@ -62,7 +75,7 @@ Grab the zips from the [latest release](../../releases/latest).
 
 ### Windows (10 / 11, nothing to install)
 
-1. Right-click `XmasSnow-windows.zip` → **Extract All** (don't run it from inside the zip).
+1. Right-click the Windows zip (`XmasSnow-windows….zip`) → **Extract All** (don't run it from inside the zip).
 2. Double-click `XmasSnow.bat`. If SmartScreen appears, click **More info → Run anyway**.
 3. A console window flashes and closes — that's normal. A few seconds later the snow starts and a "Xmas Snow is running" notification pops up. A ❄ icon appears in the system tray (click ^ if it's hidden).
 4. If nothing happens, run `XmasSnow-debug.bat` instead — it keeps a console open so you can see the error (it's also saved to `error.txt`).
