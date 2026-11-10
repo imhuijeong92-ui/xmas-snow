@@ -153,7 +153,7 @@ static class Art
 // ⚠ 릴리스를 낼 때마다 이 값과 태그를 같이 올릴 것 (같은 태그에 파일만 바꾸면 업데이트로 안 잡힌다)
 static class Updater
 {
-    public const string Version = "1.3.0";
+    public const string Version = "1.3.1";
     const string Feed = "https://api.github.com/repos/imhuijeong92-ui/xmas-snow/releases/latest";
     public const string Page = "https://github.com/imhuijeong92-ui/xmas-snow/releases/latest";
     const string RepoPath = "/imhuijeong92-ui/xmas-snow/releases/download/";
@@ -449,8 +449,9 @@ static class Xmas
         "santa", "snowman", "treats", "star", "penguin", "rare", "gifts", "santa", "snowman", "gifts", "star", "rare", "penguin",
         "santa", "treats", "snowman", "star", "rare", "treats", "gifts", "star", "santa", "rare", "santa", "xmas" };
 
-    // 업데이트한 사람이 처음 켤 때 한 번 보여 주는 안내 (릴리스마다 새로 쓴다. 비우면 안 뜬다)
-    public const string WhatsNew =
+    // 업데이트한 사람이 처음 켤 때 한 번 보여 주는 안내 (릴리스마다 새로 쓴다. 작은 수정이면 "" 로 비워 두면 아무것도 안 뜬다)
+    public const string WhatsNew = "";
+    public const string WhatsNew130 =
         "💡 Christmas lights twinkle along the top of your screen\n\n" +
         "⛄ Press and hold the snow pile to build a snowman — keep holding and it grows taller. Once in a while you'll get a special one!\n\n" +
         "🥕 New snowmen have no nose. Watch for a carrot in the snow and click it\n\n" +
@@ -1364,7 +1365,7 @@ class PileForm : Form
         b[8] = PlowRowB;
         plowBmp[0] = Art.Sprite(PlowA, pc, Art.SpriteEdge);
         plowBmp[1] = Art.Sprite(b, pc, Art.SpriteEdge);
-        rudBmp = Art.Sprite(RudolphRows, Math.Max(1, (int)Math.Round(4 * scale)), Art.Key);  // 루돌프는 회색 테두리 없이
+        rudBmp = Art.Sprite(RudolphRows, Math.Max(1, (int)Math.Round(3 * scale)), Art.SpriteEdge);  // 다른 친구들과 같은 크기·테두리
         if (savedH != null) RenderPile();
         mc = Math.Max(1, (int)Math.Round(3 * scale));
         string[] giftRows = { "..+.+..", "...+...", "###+###", "###+###", "+++++++", "###+###", "###+###" };
@@ -2342,13 +2343,15 @@ class Controller
             {
                 sk.SetValue("storyShownVersion", Updater.Version);
                 // 업데이트해서 처음 켜졌으면 동화 대신 '새로 생긴 것' 안내를 한 번
-                bool news = shown != null && Updater.IsNewer(Updater.Version, shown) && Xmas.WhatsNew.Length > 0;
+                // 1.3.0 전에서 오면 1.3 안내, 작은 수정이면 아무것도 안 띄운다
+                bool updated = shown != null && Updater.IsNewer(Updater.Version, shown);
+                string note = !updated ? null : Xmas.WhatsNew.Length > 0 ? Xmas.WhatsNew : Updater.IsNewer("1.3.0", shown) ? Xmas.WhatsNew130 : "";
                 storyTimer.Interval = 5000;
                 storyTimer.Tick += delegate
                 {
                     storyTimer.Stop();
-                    if (news) MessageBox.Show(Xmas.WhatsNew, "What's new in Xmas Snow " + Updater.Version + " ✨");
-                    else TellStory(true);
+                    if (note == null) TellStory(true);
+                    else if (note.Length > 0) MessageBox.Show(note, "What's new in Xmas Snow " + Updater.Version + " ✨");
                 };
                 storyTimer.Start();
             }

@@ -1058,7 +1058,7 @@ let plowRows = [
 ]
 let plowSprites = [spriteImage(plowRows),
                    spriteImage(plowRows.enumerated().map { $0.offset == 8 ? "RGRYRGRYRGRYRGRYRR" + $0.element.dropFirst(18) : $0.element })]
-// 눈이 다 차면 오른쪽 끝에서 빼꼼 나와 "치울까?" 하고 묻는 루돌프 (Clawd 크리스마스 테마의 루돌프와 같은 그림)
+// 눈이 다 차면 오른쪽 끝에서 빼꼼 나와 "치울까?" 하고 묻는 루돌프 (Clawd 크리스마스 테마의 루돌프와 같은 그림, 다른 친구들처럼 테두리)
 let peekDeer = spriteImage([
     ".b.b........b.b.",
     ".bbb........bbb.",
@@ -1078,7 +1078,7 @@ let peekDeer = spriteImage([
     "...BBTTTTTTBB...",
     "...BBBBBBBBBB...",
     "....bb....bb....",
-], outline: false)
+])
 
 final class PileWindow: NSPanel {
     let pile = CAGradientLayer()   // 위는 흰색 → 아래로 옅은 하늘색 (픽셀 눈 더미 그림들의 흰색+하늘색 그늘 방식)
@@ -1407,7 +1407,7 @@ final class PileWindow: NSPanel {
     func peek() {
         let root = frontRoot
         lastPeek = Date()
-        let px: CGFloat = 4
+        let px: CGFloat = 3   // 다른 친구들과 같은 한 칸 크기
         let size = CGSize(width: CGFloat(peekDeer.width) * px, height: CGFloat(peekDeer.height) * px)
         let w = root.bounds.width
         let d = CALayer()
@@ -1989,9 +1989,10 @@ extension PileWindow {
 // ── 메뉴에서 바로 업데이트 ──────────────
 // 깃허브 최신 릴리스(태그 vX.Y.Z)가 이 버전보다 높으면 ❄︎ 메뉴 맨 위에 'Update to …' 가 뜬다.
 // ⚠ 릴리스를 낼 때마다 이 값과 태그를 같이 올릴 것 (같은 태그에 파일만 바꾸면 업데이트로 안 잡힌다)
-let appVersion = "1.3.0"
-// 업데이트한 사람이 처음 켤 때 한 번 보여 주는 안내 (릴리스마다 새로 쓴다. 비우면 안 뜬다)
-let whatsNew = """
+let appVersion = "1.3.1"
+// 업데이트한 사람이 처음 켤 때 한 번 보여 주는 안내 (릴리스마다 새로 쓴다. 작은 수정이면 "" 로 비워 두면 아무것도 안 뜬다)
+let whatsNew = ""
+let whatsNew130 = """
 💡 Christmas lights twinkle along the top of your screen
 
 ⛄ Press and hold the snow pile to build a snowman — keep holding and it grows taller. Once in a while you'll get a special one!
@@ -2179,12 +2180,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         checkDay()
         dayTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.checkDay() }
         // 처음 켰을 때(새 버전으로 처음 켜졌을 때 포함) 한 번만 짧은 동화를 보여 준다 — 메뉴에 이야기책이 있다는 걸 알게
-        // 업데이트해서 처음 켜졌으면 동화 대신 '새로 생긴 것' 안내를 한 번 보여 준다
+        // 업데이트해서 처음 켜졌으면 동화 대신 '새로 생긴 것' 안내를 한 번 보여 준다 (1.3.0 전에서 오면 1.3 안내, 작은 수정이면 아무것도)
         let shownVersion = UserDefaults.standard.string(forKey: "storyShownVersion")
         if shownVersion != appVersion {
             UserDefaults.standard.set(appVersion, forKey: "storyShownVersion")
-            if let old = shownVersion, isNewer(appVersion, than: old), !whatsNew.isEmpty {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.say("What's new in Xmas Snow \(appVersion) ✨", whatsNew) }
+            if let old = shownVersion, isNewer(appVersion, than: old) {
+                let note = !whatsNew.isEmpty ? whatsNew : isNewer("1.3.0", than: old) ? whatsNew130 : ""
+                if !note.isEmpty {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.say("What's new in Xmas Snow \(appVersion) ✨", note) }
+                }
             } else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.tellStory(hint: true) }
             }
