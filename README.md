@@ -10,28 +10,67 @@ Set the snow height to **1/8** and it stays in a thin strip along the top while 
 
 ![Xmas Snow at 1/8 height over a web page](docs/desk.gif)
 
-## What it does
+## Meet the cast
 
-- **Pixel snowflakes** that sway left and right as they fall
-- **Falling treats** mixed into the snow: candy cane 🍬, gingerbread 🍪, star ⭐, ornament 🔴, mistletoe 🌿, bell 🔔, gift box 🎁
-- **Visitors** that pass by every few minutes: Santa's sleigh 🎅, a hopping snowman ⛄, a sliding penguin 🐧, shooting stars 🌠. Santa also tells you how many days are left until Christmas
-- **Click things!**
-  - Santa, the snowman or the penguin → a *"Merry Christmas!"* bubble and a shower of gifts
-  - A shooting star → *"Your wish will come true!"* ✨
-  - A falling treat → it pops into pixel confetti
-  - The snow pile (or Rudolph) → Santa drives by in a snowplow 🚜 and clears it
-- **Snow piles up** in soft, lumpy drifts along the bottom of your screen — behind the Dock on macOS, just above the taskbar on Windows. Less snow or a lower snow height means it piles up more slowly. Once it reaches its full height it stays there, and Rudolph peeks in from the right edge to ask *"Time to clear the snow?"*
-- A few **little Christmas stories** are hidden in there too. When Rudolph peeks in, **click him 5 times quickly** and he'll tell you one 🤫 — and there's a little storybook in the ❄︎ menu 📖
-- **New in 1.3:**
-  - 💡 **Christmas lights** twinkle along the top of the screen
-  - ⛄ **Build a snowman**: press and hold the snow pile. Keep holding and it grows from a snowball to a two-tier to a full snowman with a hat. Once in a while you get a special one (Santa hat, cat ears or gold)
-  - Snowmen **blink, look at your cursor, wave**, chat with each other, and hop over the snowplow
-  - 🥕 New snowmen have **no nose** — a carrot shows up in the snow now and then. Click it and it flies to a snowman
-  - 💧 Press and hold a snowman to **melt** it
-  - ⭐ **Rare visitors**: a golden snowflake, a polar bear, an owl, an Arctic fox and an elf. Click them to collect
-  - 🎁 An **advent calendar** opens on December 1, with surprises on Christmas Eve, Christmas Day and New Year's
-- Works across **multiple monitors** — Santa flies from one screen to the next
-- Light on resources: under 1% of total CPU on an M1 Mac (about 6–7% of one core) and about 27 MB of memory
+Everything is tiny pixel art, and almost everything does something when you click it.
+
+### ❄️ Falling from the sky
+
+<table>
+<tr><td align="center"><img src="docs/cast/flake.png" alt="Snowflake"></td><td><b>Snowflakes</b><br>Little pixel flakes that sway left and right on the way down.</td></tr>
+<tr><td align="center"><img src="docs/cast/candy-cane.png" alt="Candy cane"> <img src="docs/cast/gingerbread.png" alt="Gingerbread"> <img src="docs/cast/star.png" alt="Star"> <img src="docs/cast/ornament.png" alt="Ornament"> <img src="docs/cast/mistletoe.png" alt="Mistletoe"> <img src="docs/cast/bell.png" alt="Bell"> <img src="docs/cast/gift.png" alt="Gift box"></td><td><b>Falling treats</b><br>Candy canes, gingerbread, stars, ornaments, mistletoe, bells and gifts drift down with the snow. Click one and it pops into pixel confetti 🎉</td></tr>
+<tr><td align="center"><img src="docs/cast/anim-lights.gif" alt="Christmas lights"></td><td><b>Christmas lights</b><br>A string of lights along the top of the screen. Every bulb twinkles in its own time 💡</td></tr>
+</table>
+
+### 🛷 Passing by
+
+<table>
+<tr><td align="center"><img src="docs/cast/santa.png" alt="Santa's sleigh"></td><td><b>Santa</b><br>Flies across every few minutes — from one monitor to the next — and tells you how many days are left until Christmas. Click him for a shower of gifts 🎁</td></tr>
+<tr><td align="center"><img src="docs/cast/santa-eve.png" alt="Santa with three reindeer"></td><td><b>Santa's whole team</b><br>On Christmas Eve he brings three reindeer and comes by a lot more often 🎅</td></tr>
+<tr><td align="center"><img src="docs/cast/snowman-visitor.png" alt="Snowman"></td><td><b>Snowman</b><br>Hops by now and then. Click to say hi.</td></tr>
+<tr><td align="center"><img src="docs/cast/penguin.png" alt="Penguin"></td><td><b>Penguin</b><br>Slides past on its belly, kicking up snow 🐧</td></tr>
+<tr><td align="center"><img src="docs/cast/shooting-star.png" alt="Shooting star"></td><td><b>Shooting star</b><br>Gone in two seconds — click it in time and <i>your wish will come true</i> ✨</td></tr>
+</table>
+
+### ⭐ Rare visitors — catch them all
+
+They show up only once in a while. Click one to add it to <b>❄ → Rare finds</b>.
+
+<table>
+<tr><td align="center"><img src="docs/cast/golden-flake.png" alt="Golden snowflake"></td><td><b>Golden snowflake</b><br>About one in every 600 falling treats.</td></tr>
+<tr><td align="center"><img src="docs/cast/polar-bear.png" alt="Polar bear"></td><td><b>Polar bear</b><br>Takes its time. A lot of time 🐻</td></tr>
+<tr><td align="center"><img src="docs/cast/owl.png" alt="Owl"></td><td><b>Little owl</b><br>Flutters across, bobbing up and down 🦉</td></tr>
+<tr><td align="center"><img src="docs/cast/fox.png" alt="Arctic fox"></td><td><b>Arctic fox</b><br>Bounds by from the right 🦊</td></tr>
+<tr><td align="center"><img src="docs/cast/elf.png" alt="Elf"></td><td><b>Little elf</b><br>Skips along on an errand for Santa 🧝</td></tr>
+</table>
+
+### ⛄ Snowmen you build
+
+<table>
+<tr><td align="center"><img src="docs/cast/anim-grow.gif" alt="A snowman growing"></td><td><b>Press and hold the snow pile</b><br>A snowball appears — keep holding and it rolls bigger: snowball → two tiers → a full snowman with a hat. Let go whenever you like the size. Up to three at a time.</td></tr>
+<tr><td align="center"><img src="docs/cast/anim-wave.gif" alt="A snowman waving and blinking"></td><td><b>They're alive</b><br>Your snowmen blink, follow your cursor with their eyes and wave when you come close. Build two and they'll chat with each other. When the snowplow comes, they shout <i>“Not me!!”</i> and hop right over it.</td></tr>
+<tr><td align="center"><img src="docs/cast/snowman-nonose.png" alt="Snowman without a nose"> <img src="docs/cast/carrot.png" alt="Carrot"></td><td><b>Find a nose</b><br>New snowmen are missing their carrot. Every so often one turns up in the snow — click it and it flies to the nearest snowman 🥕</td></tr>
+<tr><td align="center"><img src="docs/cast/snowman-santa.png" alt="Santa snowman"> <img src="docs/cast/snowman-cat.png" alt="Kitty snowman"> <img src="docs/cast/snowman-gold.png" alt="Golden snowman"></td><td><b>Special snowmen</b><br>About one in ten full snowmen comes out wearing a Santa hat or cat ears — or made of gold. They count as rare finds too.</td></tr>
+<tr><td align="center"></td><td><b>Melting</b><br>Press and hold a snowman and it says goodbye and melts into a puddle 💧 (or ❄ → Melt all snowmen)</td></tr>
+</table>
+
+### 🏔 At the bottom of the screen
+
+Snow piles up in soft, lumpy drifts — behind the Dock on macOS, just above the taskbar on Windows. Less snow or a lower snow height means it piles up more slowly.
+
+<table>
+<tr><td align="center"><img src="docs/cast/rudolph.png" alt="Rudolph"></td><td><b>Rudolph</b><br>When the pile is full he peeks in from the right: <i>“Time to clear the snow?”</i> Click him <b>5 times quickly</b> and he'll tell you a secret 🤫</td></tr>
+<tr><td align="center"><img src="docs/cast/plow.png" alt="Santa's snowplow"></td><td><b>Santa's snowplow</b><br>Click the pile (or Rudolph) and Santa drives by and clears it all away 🚜</td></tr>
+<tr><td align="center"><img src="docs/cast/gift.png" alt="Gift"></td><td><b>Christmas morning</b><br>On December 25 a row of gifts is waiting on the snow. Click to open them.</td></tr>
+</table>
+
+### 🗓 And a few more
+
+- 🎁 **Advent calendar** — from December 1 to 25, open a new door in the ❄ menu each day for a little message and a surprise
+- 🎆 **New Year's** — fireworks and *Happy New Year!* in the first minutes of January 1
+- 📖 **A little story** — short Christmas tales in the ❄ menu (one pops up the first time you launch)
+- 🙈 **Hide for 30 minutes or 1 hour** when you need a clear screen
+- Works across **multiple monitors**, and it's light: under 1% of total CPU on an M1 Mac and about 27 MB of memory
 
 ## Menu
 
