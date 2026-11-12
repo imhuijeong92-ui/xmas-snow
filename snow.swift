@@ -183,9 +183,12 @@ final class SnowWindow: NSPanel {
 
     func spawn(_ dt: CGFloat) {
         guard !paused else { return }
-        debt += rate * dt
-        // 펑펑 + 화면 전체에서도 너무 무거워지지 않게. 눈송이 하나가 레이어 하나라 1,500 이면 화면 합성(WindowServer)이 렉 걸린다
-        let cap = 500
+        // 펑펑 + 화면 전체에서도 너무 무거워지지 않게 화면당 눈송이를 약 500 개로 맞춘다 (1,500 이면 화면 합성이 렉 걸린다).
+        // 개수가 차면 그냥 멈추면 첫 눈이 바닥에 닿을 때까지 안 내리다 몰아서 내린다 → 처음부터 내리는 속도를 낮춘다.
+        // 떠 있는 개수 ≈ 초당 개수 × 눈 하나가 띠를 지나는 시간 (평균 속도 = 30·40·50 을 0.5·0.35·0.15 로 섞은 36.5pt/초)
+        let target: CGFloat = 500, cap = 650
+        let life = (snow.bounds.height + 20) / (36.5 * fallMul) * 1.03   // 1.03 = 속도 ±30% 의 역수 평균 보정
+        debt += min(rate, target / max(life, 1)) * dt
         while debt >= 1 {
             debt -= 1
             if (snow.sublayers?.count ?? 0) < cap { addFlake() }
@@ -1989,7 +1992,7 @@ extension PileWindow {
 // ── 메뉴에서 바로 업데이트 ──────────────
 // 깃허브 최신 릴리스(태그 vX.Y.Z)가 이 버전보다 높으면 ❄︎ 메뉴 맨 위에 'Update to …' 가 뜬다.
 // ⚠ 릴리스를 낼 때마다 이 값과 태그를 같이 올릴 것 (같은 태그에 파일만 바꾸면 업데이트로 안 잡힌다)
-let appVersion = "1.3.2"
+let appVersion = "1.3.3"
 // 업데이트한 사람이 처음 켤 때 한 번 보여 주는 안내 (릴리스마다 새로 쓴다. 작은 수정이면 "" 로 비워 두면 아무것도 안 뜬다)
 let whatsNew = ""
 let whatsNew130 = """
