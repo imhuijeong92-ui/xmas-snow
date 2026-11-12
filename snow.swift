@@ -105,6 +105,71 @@ final class ClickView: NSView {
     }
 }
 
+// 눌러도 메뉴가 닫히지 않는 켜고 끄기 항목 — 간식·손님처럼 여러 개를 연달아 끌 때.
+// 메뉴 항목에 뷰를 달면 AppKit 이 클릭에 메뉴를 닫지 않는다. 대신 강조·체크 표시를 직접 그린다.
+final class StayOpenToggleView: NSView {
+    let title: String
+    let onToggle: () -> Void
+    private let font = NSFont.menuFont(ofSize: 0)
+    init(title: String, onToggle: @escaping () -> Void) {
+        self.title = title
+        self.onToggle = onToggle
+        let w = (title as NSString).size(withAttributes: [.font: NSFont.menuFont(ofSize: 0)]).width
+        super.init(frame: NSRect(x: 0, y: 0, width: ceil(w) + 44, height: 22))
+        autoresizingMask = .width
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    // 뷰 항목은 메뉴가 강조를 다시 그려 주지 않는다 → 메뉴 delegate(willHighlight)가 지금 강조된 항목을 알려 준다
+    static weak var highlighted: NSMenuItem?
+    private var pressed = false   // 이 항목 위에서 눌렀을 때만 뗄 때 바꾼다(메뉴를 여는 순간의 떼기 등은 무시)
+    override func mouseDown(with event: NSEvent) { pressed = true }
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .checkBox }
+    override func accessibilityLabel() -> String? { title }
+    override func accessibilityValue() -> Any? { (enclosingMenuItem?.state == .on) as NSNumber }
+    override func accessibilityPerformPress() -> Bool { onToggle(); needsDisplay = true; return true }
+    func resetPress() { pressed = false }
+    override func draw(_ dirtyRect: NSRect) {
+        let hi = enclosingMenuItem != nil && StayOpenToggleView.highlighted === enclosingMenuItem
+        if hi {
+            NSColor.controlAccentColor.withAlphaComponent(0.8).setFill()   // 보통 메뉴 강조와 비슷한 밝기
+            NSBezierPath(roundedRect: bounds.insetBy(dx: 5, dy: 0), xRadius: 4, yRadius: 4).fill()
+        }
+        let color: NSColor = hi ? .selectedMenuItemTextColor : .labelColor
+        if enclosingMenuItem?.state == .on,
+           let mark = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "on")?
+               .withSymbolConfiguration(.init(pointSize: 11, weight: .semibold).applying(.init(paletteColors: [color]))) {
+            mark.draw(in: NSRect(x: 9, y: (bounds.height - mark.size.height) / 2, width: mark.size.width, height: mark.size.height))
+        }
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+        let h = (title as NSString).size(withAttributes: attrs).height
+        (title as NSString).draw(at: NSPoint(x: 24, y: (bounds.height - h) / 2), withAttributes: attrs)
+    }
+    override func mouseUp(with event: NSEvent) {
+        guard pressed else { return }
+        pressed = false
+        onToggle()
+        StayOpenToggleView.highlighted = enclosingMenuItem   // 누른 뒤에도 강조가 남아 있게(메뉴가 강조를 풀어 버린다)
+        needsDisplay = true
+    }
+}
+
+// 안 닫히는 항목이 든 하위 메뉴의 delegate — 강조가 옮겨 갈 때 뷰를 다시 그리게 한다
+final class StayOpenMenuDelegate: NSObject, NSMenuDelegate {
+    static let shared = StayOpenMenuDelegate()
+    func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
+        StayOpenToggleView.highlighted = item
+        menu.items.forEach { $0.view?.needsDisplay = true }
+    }
+    var onTopMenuClose: (() -> Void)?   // 최상위 메뉴가 닫힐 때(미뤄 둔 다시 만들기)
+    func menuDidClose(_ menu: NSMenu) {
+        if menu.supermenu == nil { onTopMenuClose?(); return }
+        if let h = StayOpenToggleView.highlighted, h.menu === menu { StayOpenToggleView.highlighted = nil }
+        menu.items.forEach { ($0.view as? StayOpenToggleView)?.resetPress() }
+    }
+}
+
 // 평소엔 클릭이 통과하고, 산타가 커서 아래 있을 때만 클릭을 받는다. 포커스는 안 뺏는다.
 final class SnowWindow: NSPanel {
     // 눈송이 하나하나가 레이어. 좌우로 흔들리며(왼쪽 대각선 ↔ 오른쪽 대각선) 내려온다.
@@ -1992,7 +2057,7 @@ extension PileWindow {
 // ── 메뉴에서 바로 업데이트 ──────────────
 // 깃허브 최신 릴리스(태그 vX.Y.Z)가 이 버전보다 높으면 ❄︎ 메뉴 맨 위에 'Update to …' 가 뜬다.
 // ⚠ 릴리스를 낼 때마다 이 값과 태그를 같이 올릴 것 (같은 태그에 파일만 바꾸면 업데이트로 안 잡힌다)
-let appVersion = "1.3.3"
+let appVersion = "1.3.4"
 // 업데이트한 사람이 처음 켤 때 한 번 보여 주는 안내 (릴리스마다 새로 쓴다. 작은 수정이면 "" 로 비워 두면 아무것도 안 뜬다)
 let whatsNew = ""
 let whatsNew130 = """
@@ -2409,17 +2474,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // 메뉴: 항목이 많아 하위 메뉴로 묶는다
+    var menuHeld = false   // 안 닫히는 항목을 누르는 중 — 열린 메뉴를 갈아 끼우지 않는다(상태는 항목이 직접 바꿈)
+    var menuDirty = false  // 그동안 건너뛴 다시 만들기 — 메뉴가 닫힐 때 한다
     func buildMenu() {
+        if menuHeld { menuDirty = true; return }
         func item(_ title: String, _ action: Selector?, tag: Int = 0, on: Bool = false) -> NSMenuItem {
             let it = NSMenuItem(title: title, action: action, keyEquivalent: "")
             it.tag = tag
             it.state = on ? .on : .off
             return it
         }
+        // 눌러도 메뉴가 안 닫히는 켜고 끄기 — 기존 toggle 함수를 그대로 부르고, 체크만 그 자리에서 바꾼다
+        func stay(_ title: String, _ action: Selector, tag: Int = 0, isOn: @escaping () -> Bool) -> NSMenuItem {
+            let it = item(title, action, tag: tag, on: isOn())
+            it.view = StayOpenToggleView(title: title) { [weak self, weak it] in
+                guard let self = self, let it = it else { return }
+                self.menuHeld = true
+                defer { self.menuHeld = false }
+                NSApp.sendAction(action, to: self, from: it)
+                it.state = isOn() ? .on : .off   // 체크는 실제 값에서 읽는다
+                self.menuDirty = true   // 열린 동안 다른 경로로 메뉴가 바뀌었을 수 있어 닫힐 때 새로 만든다
+            }
+            return it
+        }
         func sub(_ title: String, _ items: [NSMenuItem]) -> NSMenuItem {
             let it = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             let m = NSMenu()
             items.forEach { m.addItem($0) }
+            if items.contains(where: { $0.view is StayOpenToggleView }) { m.delegate = StayOpenMenuDelegate.shared }
             it.submenu = m
             return it
         }
@@ -2433,7 +2515,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(sub("❄︎ Snow amount", Amount.allCases.map { item($0.title, #selector(pick(_:)), tag: $0.rawValue, on: $0 == amount) }))
         m.addItem(sub("↕︎ Snow height", bandChoices.enumerated().map { item($1.title, #selector(pickBand(_:)), tag: $0, on: $0 == bandIndex) }))
         m.addItem(sub("⏬ Fall speed", fallSpeeds.enumerated().map { item($1.title, #selector(pickFallSpeed(_:)), tag: $0, on: $0 == fallSpeedIndex) }))
-        m.addItem(sub("🍬 Falling treats", treatGroups.enumerated().map { item($1.title, #selector(toggleTreat(_:)), tag: $0, on: !treatsOff.contains($0)) }))
+        m.addItem(sub("🍬 Falling treats", treatGroups.enumerated().map { i, g in stay(g.title, #selector(toggleTreat(_:)), tag: i) { !treatsOff.contains(i) } }))
         m.addItem(item("🏔 Snow piles up", #selector(togglePile), on: pileOn))
         // 회색 안내 — 쌓인 눈을 누르면 치우고, 길게 누르면 눈사람, 눈사람을 길게 누르면 녹는다
         for t in ["Tip: click the pile to clear it 🚜", "Tip: press and hold the pile to build a snowman ⛄",
@@ -2453,10 +2535,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                           item("1 hour", #selector(hideFor(_:)), tag: 60)]))
         }
         m.addItem(.separator())
-        m.addItem(sub("🛷 Visitors", [item("Santa 🎅", #selector(toggleSanta), on: santaOn),
-                                          item("Snowman ⛄", #selector(toggleSnowman), on: snowmanOn),
-                                          item("Penguin 🐧", #selector(togglePenguin), on: penguinOn),
-                                          item("Shooting star 🌠", #selector(toggleStar), on: starOn)]))
+        m.addItem(sub("🛷 Visitors", [stay("Santa 🎅", #selector(toggleSanta)) { [unowned self] in self.santaOn },
+                                          stay("Snowman ⛄", #selector(toggleSnowman)) { [unowned self] in self.snowmanOn },
+                                          stay("Penguin 🐧", #selector(togglePenguin)) { [unowned self] in self.penguinOn },
+                                          stay("Shooting star 🌠", #selector(toggleStar)) { [unowned self] in self.starOn }]))
         m.addItem(sub("⭐ Rare finds \(collected.count)/\(rareFinds.count)", rareFinds.map { r in
             let it = item(collected.contains(r.id) ? "\(r.emoji) \(r.name)" : "???", nil)
             it.isEnabled = false
@@ -2485,6 +2567,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(item("Check for updates… (v\(appVersion))", #selector(checkNow)))
         let quit = NSMenuItem(title: "Stop snow (Quit)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         m.addItem(quit)
+        m.delegate = StayOpenMenuDelegate.shared
+        StayOpenMenuDelegate.shared.onTopMenuClose = { [weak self] in
+            guard let self = self, self.menuDirty else { return }
+            self.menuDirty = false
+            DispatchQueue.main.async { self.buildMenu() }
+        }
         status.menu = m
     }
 
