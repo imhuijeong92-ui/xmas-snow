@@ -184,7 +184,8 @@ final class SnowWindow: NSPanel {
     func spawn(_ dt: CGFloat) {
         guard !paused else { return }
         debt += rate * dt
-        let cap = 1500  // 펑펑 + 화면 전체에서도 너무 무거워지지 않게
+        // 펑펑 + 화면 전체에서도 너무 무거워지지 않게. 눈송이 하나가 레이어 하나라 1,500 이면 화면 합성(WindowServer)이 렉 걸린다
+        let cap = 500
         while debt >= 1 {
             debt -= 1
             if (snow.sublayers?.count ?? 0) < cap { addFlake() }
@@ -1637,8 +1638,7 @@ extension PileWindow {
         }
         let snowmen = standers.filter { $0.name == "snowman" }
         if snowmen.count >= 3, let old = snowmen.first {
-            standers.removeAll { $0 === old }
-            old.removeFromSuperlayer()
+            melt(old)   // 조용히 없애면 왜 사라졌는지 모른다 → 인사하고 녹는 모습을 보여 준다
         }
         buildSpan = span
         scoop()
@@ -1989,7 +1989,7 @@ extension PileWindow {
 // ── 메뉴에서 바로 업데이트 ──────────────
 // 깃허브 최신 릴리스(태그 vX.Y.Z)가 이 버전보다 높으면 ❄︎ 메뉴 맨 위에 'Update to …' 가 뜬다.
 // ⚠ 릴리스를 낼 때마다 이 값과 태그를 같이 올릴 것 (같은 태그에 파일만 바꾸면 업데이트로 안 잡힌다)
-let appVersion = "1.3.1"
+let appVersion = "1.3.2"
 // 업데이트한 사람이 처음 켤 때 한 번 보여 주는 안내 (릴리스마다 새로 쓴다. 작은 수정이면 "" 로 비워 두면 아무것도 안 뜬다)
 let whatsNew = ""
 let whatsNew130 = """
@@ -2544,10 +2544,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         URLSession.shared.downloadTask(with: u.url) { tmp, resp, _ in
             let fm = FileManager.default
             var installed: URL?
-            let old = Bundle.main.bundleURL
-            // 바꿔 넣을 새 앱은 지금 앱과 같은 볼륨의 임시 폴더에 푼다 (replaceItemAt 요구 사항)
+            // zip 을 받아 다운로드 폴더에서 바로 열면 macOS 가 읽기 전용 임시 경로(AppTranslocation)에서 돌린다.
+            // 그 자리는 바꿔 넣을 수 없으니, 그럴 땐 응용 프로그램 폴더에 새 앱을 깔고 거기서 다시 연다.
+            // 확인용(가짜 피드일 때만): XMASSNOW_TRANSLOCATED 로 격리 실행을 흉내 내고, XMASSNOW_APPS 로 설치 폴더를 바꾼다
+            let env = ProcessInfo.processInfo.environment
+            let translocated = Bundle.main.bundleURL.path.contains("/AppTranslocation/") || (testFeed != nil && env["XMASSNOW_TRANSLOCATED"] != nil)
+            let appsDir = testFeed != nil ? env["XMASSNOW_APPS"] ?? "/Applications" : "/Applications"
+            let old = translocated ? URL(fileURLWithPath: appsDir).appendingPathComponent("XmasSnow.app") : Bundle.main.bundleURL
+            // 바꿔 넣을 새 앱은 설치할 곳과 같은 볼륨의 임시 폴더에 푼다 (replaceItemAt 요구 사항)
             if let tmp = tmp, (resp as? HTTPURLResponse)?.statusCode == 200,
-               let work = try? fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: old, create: true) {
+               let work = try? fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: old.deletingLastPathComponent(), create: true) {
                 let zip = work.appendingPathComponent("XmasSnow-mac.zip"), out = work.appendingPathComponent("out")
                 let newApp = out.appendingPathComponent("XmasSnow.app")
                 if (try? fm.createDirectory(at: out, withIntermediateDirectories: true)) != nil,
@@ -2556,9 +2562,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                    fm.isExecutableFile(atPath: newApp.appendingPathComponent("Contents/MacOS/snowfall").path),
                    // 서명 검사는 진짜임 보증이 아니라(ad-hoc) 풀린 앱이 멀쩡하고 같은 앱인지 확인용. 보안은 HTTPS + 저장소 주소 확인
                    run("/usr/bin/codesign", ["--verify", "-R=identifier \"io.github.imhuijeong92-ui.xmas-snow\"", newApp.path]),
-                   !old.path.contains("/AppTranslocation/"),   // 격리된 채로 실행 중이면 바꿔 넣을 수 없다
+                   // 응용 프로그램 폴더에 같은 이름의 다른 앱이 있으면 덮어쓰지 않는다
+                   !fm.fileExists(atPath: old.path) || Bundle(url: old)?.bundleIdentifier == "io.github.imhuijeong92-ui.xmas-snow",
                    fm.isWritableFile(atPath: old.deletingLastPathComponent().path) {
-                    do { installed = try fm.replaceItemAt(old, withItemAt: newApp) }
+                    do {
+                        if fm.fileExists(atPath: old.path) { installed = try fm.replaceItemAt(old, withItemAt: newApp) }
+                        else { try fm.moveItem(at: newApp, to: old); installed = old }
+                    }
                     catch {
                         // 바꿔 넣다 실패하면서 원래 앱을 다른 곳에 옮겨 둔 경우 제자리로 되돌린다
                         if !fm.fileExists(atPath: old.path),
@@ -2581,7 +2591,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     self.updating = false
                     self.buildMenu()
-                    self.say("Couldn't update automatically", "The download page will open. Please replace XmasSnow.app with the new one.")
+                    self.say("Couldn't update automatically", "The download page will open. Quit Xmas Snow, move the new XmasSnow.app into your Applications folder, and open it from there — then future updates install with one click.")
                     NSWorkspace.shared.open(releasePage)
                 }
             }

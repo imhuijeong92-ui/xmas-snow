@@ -18,7 +18,7 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
   <key>CFBundleIdentifier</key><string>io.github.imhuijeong92-ui.xmas-snow</string>
   <key>CFBundleName</key><string>Xmas Snow</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.3.1</string>
+  <key>CFBundleShortVersionString</key><string>1.3.2</string>
   <key>LSUIElement</key><true/>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
 </dict></plist>
