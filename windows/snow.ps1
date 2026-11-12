@@ -153,7 +153,7 @@ static class Art
 // ⚠ 릴리스를 낼 때마다 이 값과 태그를 같이 올릴 것 (같은 태그에 파일만 바꾸면 업데이트로 안 잡힌다)
 static class Updater
 {
-    public const string Version = "1.3.1";
+    public const string Version = "1.3.5";
     const string Feed = "https://api.github.com/repos/imhuijeong92-ui/xmas-snow/releases/latest";
     public const string Page = "https://github.com/imhuijeong92-ui/xmas-snow/releases/latest";
     const string RepoPath = "/imhuijeong92-ui/xmas-snow/releases/download/";
@@ -2583,6 +2583,31 @@ class Controller
         return it;
     }
 
+    // 눌러도 메뉴가 안 닫히는 켜고 끄기 — 간식·손님처럼 여러 개를 연달아 끌 때.
+    // 하위 메뉴의 ItemClicked 가 바로 뒤따르는 닫기(ItemClicked)보다 먼저 와서, 거기서 표시하고 닫기에서 한 번 쓰고 지운다.
+    // 하위 메뉴의 닫기를 취소하면 최상위 메뉴까지 닫기가 가지 않는다(WinForms SetVisibleCore).
+    static readonly object StayTag = new object();
+    bool keepMenuOpen;   // 방금 누른 것이 안 닫히는 항목
+    bool menuDirty;      // 열린 동안 바뀐 것이 있다 → 닫힐 때 메뉴를 새로 만든다
+    ToolStripMenuItem StayItem(string text, bool check, Func<bool> toggle)
+    {
+        ToolStripMenuItem it = new ToolStripMenuItem(text);
+        it.Checked = check;
+        it.Tag = StayTag;
+        it.Click += delegate { it.Checked = toggle(); Save(); menuDirty = true; };
+        return it;
+    }
+    void HoldMenu(object sender, ToolStripDropDownClosingEventArgs e)
+    {
+        if (keepMenuOpen && e.CloseReason == ToolStripDropDownCloseReason.ItemClicked) e.Cancel = true;
+        keepMenuOpen = false;   // 클릭 한 번에 닫기 한 번 — 남지 않게 바로 지운다
+    }
+    void KeepOpen(ToolStripMenuItem parent)
+    {
+        parent.DropDown.ItemClicked += delegate(object s, ToolStripItemClickedEventArgs e) { keepMenuOpen = e.ClickedItem.Tag == StayTag; };
+        parent.DropDown.Closing += HoldMenu;
+    }
+
     // 메뉴: 항목이 많아 하위 메뉴로 묶는다
     void BuildMenu()
     {
@@ -2629,8 +2654,9 @@ class Controller
         for (int i = 0; i < SnowForm.TreatGroupName.Length; i++)
         {
             int t = i;
-            treats.DropDownItems.Add(Item(SnowForm.TreatGroupName[i], SnowForm.TreatOn[t], delegate { SnowForm.TreatOn[t] = !SnowForm.TreatOn[t]; Save(); BuildMenu(); }));
+            treats.DropDownItems.Add(StayItem(SnowForm.TreatGroupName[i], SnowForm.TreatOn[t], delegate { SnowForm.TreatOn[t] = !SnowForm.TreatOn[t]; return SnowForm.TreatOn[t]; }));
         }
+        KeepOpen(treats);
         m.Items.Add(treats);
         m.Items.Add(Item("🏔 Snow piles up", pileOn, delegate { pileOn = !pileOn; Save(); RebuildPiles(); BuildMenu(); }));
         // 회색 안내 — 쌓인 눈을 누르면 치우고, 길게 누르면 눈사람, 눈사람을 길게 누르면 녹는다
@@ -2653,10 +2679,11 @@ class Controller
         m.Items.Add(new ToolStripSeparator());
 
         ToolStripMenuItem pals = new ToolStripMenuItem("Visitors");
-        pals.DropDownItems.Add(Item("Santa", santaOn, delegate { santaOn = !santaOn; Save(); ScheduleSanta(false); BuildMenu(); }));
-        pals.DropDownItems.Add(Item("Snowman", snowmanOn, delegate { snowmanOn = !snowmanOn; Save(); BuildMenu(); }));
-        pals.DropDownItems.Add(Item("Penguin", penguinOn, delegate { penguinOn = !penguinOn; Save(); BuildMenu(); }));
-        pals.DropDownItems.Add(Item("Shooting star", starOn, delegate { starOn = !starOn; Save(); BuildMenu(); }));
+        pals.DropDownItems.Add(StayItem("Santa", santaOn, delegate { santaOn = !santaOn; ScheduleSanta(false); return santaOn; }));
+        pals.DropDownItems.Add(StayItem("Snowman", snowmanOn, delegate { snowmanOn = !snowmanOn; return snowmanOn; }));
+        pals.DropDownItems.Add(StayItem("Penguin", penguinOn, delegate { penguinOn = !penguinOn; return penguinOn; }));
+        pals.DropDownItems.Add(StayItem("Shooting star", starOn, delegate { starOn = !starOn; return starOn; }));
+        KeepOpen(pals);
         m.Items.Add(pals);
 
         ToolStripMenuItem finds = new ToolStripMenuItem("⭐ Rare finds " + Xmas.Collected.Count + "/" + Xmas.RareId.Length);
@@ -2701,7 +2728,13 @@ class Controller
         m.Items.Add(Item("Check for updates… (v" + Updater.Version + ")", false, delegate { manualCheck = true; Updater.CheckAsync(); }));
         m.Items.Add(Item("Stop snow (Quit)", false, delegate { tray.Visible = false; Application.Exit(); }));
         m.Opened += delegate { PileForm.MenuOpen = true; };
-        m.Closed += delegate { PileForm.MenuOpen = false; };
+        m.Closed += delegate
+        {
+            PileForm.MenuOpen = false;
+            keepMenuOpen = false;
+            // 열린 동안 바꾼 체크를 새 메뉴에도 맞춘다(그사이 다른 경로가 메뉴를 갈아 끼웠을 수 있다)
+            if (menuDirty) { menuDirty = false; BuildMenu(); }
+        };
         tray.ContextMenuStrip = m;
     }
 }
