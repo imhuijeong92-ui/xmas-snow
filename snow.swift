@@ -247,6 +247,7 @@ final class SnowWindow: NSPanel {
     }
 
     func spawn(_ dt: CGFloat) {
+        sweepFinished()   // 숨겨 둔 동안에도 다 떨어진 눈은 치운다
         guard !paused else { return }
         // 펑펑 + 화면 전체에서도 너무 무거워지지 않게 화면당 눈송이를 약 500 개로 맞춘다 (1,500 이면 화면 합성이 렉 걸린다).
         // 개수가 차면 그냥 멈추면 첫 눈이 바닥에 닿을 때까지 안 내리다 몰아서 내린다 → 처음부터 내리는 속도를 낮춘다.
@@ -270,6 +271,20 @@ final class SnowWindow: NSPanel {
                 let g = treatGroups[gi]
                 addFaller(g.imgs.randomElement()!, px: 2.5, speed: CGFloat.random(in: 28...40), tilt: true, twinkle: g.twinkle, group: gi)
             }
+        }
+    }
+
+    // 다 떨어진 눈은 애니메이션 완료 블록에서 치우는데, 잠자기·화면 바뀜 뒤엔 그 블록이 안 오는 때가 있다.
+    // 그러면 화면 밖에 멈춘 눈이 상한(650)을 채워 새 눈이 안 내린다 → 끝날 시각이 지난 것은 여기서도 치운다(1초에 한 번).
+    private var lastSweep: CFTimeInterval = 0
+    private func sweepFinished() {
+        let now = CACurrentMediaTime()
+        guard now - lastSweep >= 1 else { return }
+        lastSweep = now
+        for l in snow.sublayers ?? [] {
+            guard let end = l.value(forKey: "endAt") as? CFTimeInterval, now > end + 2 else { continue }
+            l.removeFromSuperlayer()
+            treatLive.removeAll { $0 === l }
         }
     }
 
@@ -310,6 +325,7 @@ final class SnowWindow: NSPanel {
         move.calculationMode = .cubic
         move.isRemovedOnCompletion = false
         move.fillMode = .forwards
+        flake.setValue(CACurrentMediaTime() + duration, forKey: "endAt")
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -333,7 +349,8 @@ final class SnowWindow: NSPanel {
         if twinkle {
             let tw = CABasicAnimation(keyPath: "opacity")
             tw.fromValue = 1; tw.toValue = 0.45; tw.duration = 0.5
-            tw.autoreverses = true; tw.repeatCount = .infinity
+            // 끝없이 반복하면 트랜잭션 완료 블록이 영영 안 와서 다 떨어진 간식이 안 치워진다 → 떨어지는 동안만 반짝인다
+            tw.autoreverses = true; tw.repeatDuration = duration
             flake.add(tw, forKey: "twinkle")
         }
         CATransaction.commit()
@@ -2057,7 +2074,7 @@ extension PileWindow {
 // ── 메뉴에서 바로 업데이트 ──────────────
 // 깃허브 최신 릴리스(태그 vX.Y.Z)가 이 버전보다 높으면 ❄︎ 메뉴 맨 위에 'Update to …' 가 뜬다.
 // ⚠ 릴리스를 낼 때마다 이 값과 태그를 같이 올릴 것 (같은 태그에 파일만 바꾸면 업데이트로 안 잡힌다)
-let appVersion = "1.3.4"
+let appVersion = "1.3.6"
 // 업데이트한 사람이 처음 켤 때 한 번 보여 주는 안내 (릴리스마다 새로 쓴다. 작은 수정이면 "" 로 비워 두면 아무것도 안 뜬다)
 let whatsNew = ""
 let whatsNew130 = """
